@@ -144,6 +144,19 @@
           "creationRetry": "Error al crear la suscripción. Intentando con el proxy de Clash...",
           "creationSuccess": "Creación de la suscripción con el proxy de Clash exitosa"
         }
+      },
+      "account": {
+        "source": "Freecat account",
+        "server": "Server address",
+        "serverHint": "HTTPS API server address, not a subscription download URL",
+        "email": "Account email",
+        "password": "Password",
+        "passwordHint": "Leave blank to use the password stored in Keychain",
+        "setupHint": "Supports Freecat 3.1.0 on macOS. Initial setup imports protocol material from the installed Freecat app; the app does not need to run.",
+        "loginAndSave": "Sign in and save",
+        "editLogin": "Account settings / sign in again",
+        "defaultName": "Freecat",
+        "defaultDescription": "Sign in to Freecat and automatically download and decrypt subscription updates"
       }
     },
     "proxiesEditor": {

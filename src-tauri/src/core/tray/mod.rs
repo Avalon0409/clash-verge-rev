@@ -802,6 +802,10 @@ async fn create_tray_menu(
     let current_proxy_mode = mode.unwrap_or("");
 
     let mut verge_settings = Config::verge().await.latest_arc();
+    let application_mode = verge_settings
+        .application_proxy
+        .as_ref()
+        .is_some_and(|settings| settings.enabled);
     let fetch_proxy_groups =
         options.include_proxy_groups && verge_settings.tray_proxy_groups_display_mode.as_deref() != Some("disable");
 
@@ -865,7 +869,7 @@ async fn create_tray_menu(
         app_handle,
         MenuIds::GLOBAL_MODE,
         &texts.global_mode,
-        true,
+        !application_mode,
         current_proxy_mode == "global",
         hotkeys.get("clash_mode_global").copied(),
     )?;
@@ -874,7 +878,7 @@ async fn create_tray_menu(
         app_handle,
         MenuIds::DIRECT_MODE,
         &texts.direct_mode,
-        true,
+        !application_mode,
         current_proxy_mode == "direct",
         hotkeys.get("clash_mode_direct").copied(),
     )?;

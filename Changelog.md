@@ -35,6 +35,11 @@
 <summary><strong> ✨ 新增功能 </strong></summary>
 
 - 新增系统托盘代理组中的「测试延迟」菜单项
+- 新增「应用代理」页面，支持指定应用代理开关、默认直连、查看应用连接及节点延迟，支持按应用选择规则分流或强制代理
+
+**🍎 macOS**
+
+- Add macOS Freecat account subscriptions with sign-in, encrypted subscription updates and Keychain credential storage
 
 </details>
 

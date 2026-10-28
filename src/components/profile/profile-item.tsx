@@ -424,7 +424,9 @@ const ProfileItemBase = (props: ProfileItemProps) => {
     home: 'profiles.components.menu.home',
     select: 'profiles.components.menu.select',
     shareQrCode: 'profiles.components.menu.shareQrCode',
-    editInfo: 'profiles.components.menu.editInfo',
+    editInfo: itemData.account
+      ? 'profiles.modals.profileForm.account.editLogin'
+      : 'profiles.components.menu.editInfo',
     editFile: 'profiles.components.menu.editFile',
     editRules: 'profiles.components.menu.editRules',
     editProxies: 'profiles.components.menu.editProxies',
@@ -455,7 +457,7 @@ const ProfileItemBase = (props: ProfileItemProps) => {
     {
       label: menuLabels.shareQrCode,
       handler: onShareQrCode,
-      disabled: false,
+      disabled: !!itemData.account,
     },
     {
       label: menuLabels.editInfo,

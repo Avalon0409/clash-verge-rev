@@ -144,6 +144,19 @@
           "creationRetry": "訂閱建立失敗，嘗試使用 Clash 代理建立",
           "creationSuccess": "使用 Clash 代理建立訂閱成功"
         }
+      },
+      "account": {
+        "source": "自由貓帳號",
+        "server": "伺服器位址",
+        "serverHint": "填寫 HTTPS 登入服務位址，而非訂閱下載連結",
+        "email": "帳號（電子郵件）",
+        "password": "密碼",
+        "passwordHint": "留空使用 Keychain 中已儲存的密碼",
+        "setupHint": "支援 macOS 上的自由貓 3.1.0。首次設定需已安裝自由貓以匯入解碼參數，不需執行自由貓。",
+        "loginAndSave": "登入並儲存",
+        "editLogin": "帳號設定 / 重新登入",
+        "defaultName": "自由貓",
+        "defaultDescription": "透過帳號登入取得自由貓訂閱，自動下載並解密更新"
       }
     },
     "proxiesEditor": {

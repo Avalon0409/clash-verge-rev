@@ -15,8 +15,13 @@ import { Controller, useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 
 import { BaseDialog, Switch } from '@/components/base'
+import subscriptionProviders from '@/config/subscription-providers.json'
 import { useProfiles } from '@/hooks/use-profiles'
-import { createProfile, patchProfile } from '@/services/cmds'
+import {
+  createProfile,
+  patchProfile,
+  saveAccountProfile,
+} from '@/services/cmds'
 import { mutate } from '@/services/mutate'
 import { showNotice } from '@/services/notice-service'
 import { version } from '@root/package.json'
@@ -42,6 +47,9 @@ export function ProfileViewer({ onChange, ref }: ProfileViewerProps) {
   const [open, setOpen] = useState(false)
   const [openType, setOpenType] = useState<'new' | 'edit'>('new')
   const [loading, setLoading] = useState(false)
+  const [source, setSource] = useState<'remote' | 'local' | 'freecat'>('remote')
+  const [password, setPassword] = useState('')
+  const isAccount = source === 'freecat'
   const { profiles } = useProfiles()
 
   const fileDataRef = useRef<string | null>(null)
@@ -63,14 +71,19 @@ export function ProfileViewer({ onChange, ref }: ProfileViewerProps) {
 
   useImperativeHandle(ref, () => ({
     create: () => {
+      reset()
+      setSource('remote')
+      setPassword('')
       setOpenType('new')
       setOpen(true)
     },
     edit: (item: IProfileItem) => {
       if (item) {
-        Object.entries(item).forEach(([key, value]) => {
-          setValue(key as any, value)
-        })
+        reset(item)
+        setSource(
+          item.account ? 'freecat' : item.type === 'local' ? 'local' : 'remote',
+        )
+        setPassword('')
       }
       setOpenType('edit')
       setOpen(true)
@@ -95,7 +108,7 @@ export function ProfileViewer({ onChange, ref }: ProfileViewerProps) {
         if (!form.type) {
           throw new Error(t('profiles.modals.profileForm.errors.typeRequired'))
         }
-        if (form.type === 'remote' && !form.url) {
+        if (form.type === 'remote' && !isAccount && !form.url) {
           throw new Error(t('profiles.modals.profileForm.errors.urlRequired'))
         }
 
@@ -115,7 +128,12 @@ export function ProfileViewer({ onChange, ref }: ProfileViewerProps) {
         }
 
         const name = form.name || `${form.type} file`
-        const item = { ...form, name, option }
+        const item = {
+          ...form,
+          name,
+          option,
+          account: isAccount ? form.account : undefined,
+        }
         const isRemote = form.type === 'remote'
         const isUpdate = openType === 'edit'
 
@@ -127,7 +145,20 @@ export function ProfileViewer({ onChange, ref }: ProfileViewerProps) {
           self_proxy: form.option?.self_proxy,
         }
 
-        if (!isRemote) {
+        if (isAccount) {
+          await mutate(
+            () =>
+              saveAccountProfile(
+                item,
+                isUpdate ? form.uid : undefined,
+                password ? { password } : undefined,
+              ),
+            {
+              id: isUpdate ? 'patch-profile' : 'create-profile',
+              errorNotice: false,
+            },
+          )
+        } else if (!isRemote) {
           if (openType === 'new') {
             await mutate(() => createProfile(item, fileDataRef.current), {
               id: 'create-profile',
@@ -211,6 +242,7 @@ export function ProfileViewer({ onChange, ref }: ProfileViewerProps) {
         }
 
         setOpen(false)
+        setPassword('')
         setTimeout(() => reset(), 500)
         fileDataRef.current = null
 
@@ -228,6 +260,7 @@ export function ProfileViewer({ onChange, ref }: ProfileViewerProps) {
   const handleClose = () => {
     try {
       setOpen(false)
+      setPassword('')
       fileDataRef.current = null
       setTimeout(() => reset(), 500)
     } catch (e) {
@@ -257,7 +290,11 @@ export function ProfileViewer({ onChange, ref }: ProfileViewerProps) {
           : t('profiles.modals.profileForm.title.edit')
       }
       contentSx={{ width: 375, pb: 0, maxHeight: '80%' }}
-      okBtn={t('shared.actions.save')}
+      okBtn={
+        isAccount
+          ? t('profiles.modals.profileForm.account.loginAndSave')
+          : t('shared.actions.save')
+      }
       cancelBtn={t('shared.actions.cancel')}
       onClose={handleClose}
       onCancel={handleClose}
@@ -274,11 +311,47 @@ export function ProfileViewer({ onChange, ref }: ProfileViewerProps) {
             </InputLabel>
             <Select
               {...field}
+              value={source}
+              disabled={openType === 'edit'}
+              onChange={(event) => {
+                const next = event.target.value as typeof source
+                setSource(next)
+                field.onChange(next === 'local' ? 'local' : 'remote')
+                if (next === 'freecat' && !getValues('account')) {
+                  if (!getValues('name'))
+                    setValue(
+                      'name',
+                      t('profiles.modals.profileForm.account.defaultName'),
+                    )
+                  if (!getValues('desc'))
+                    setValue(
+                      'desc',
+                      t(
+                        'profiles.modals.profileForm.account.defaultDescription',
+                      ),
+                    )
+                  if (!getValues('option.update_interval'))
+                    setValue(
+                      'option.update_interval',
+                      subscriptionProviders.freecat.updateInterval,
+                    )
+                  setValue('account', {
+                    provider: 'freecat',
+                    server_url: subscriptionProviders.freecat.serverUrl,
+                    email: '',
+                    credential_id: '',
+                    client_user_agent: subscriptionProviders.freecat.userAgent,
+                  })
+                }
+              }}
               autoFocus
               label={t('profiles.modals.profileForm.fields.type')}
             >
               <MenuItem value="remote">
                 {t('profiles.modals.profileForm.types.remote')}
+              </MenuItem>
+              <MenuItem value="freecat">
+                {t('profiles.modals.profileForm.account.source')}
               </MenuItem>
               <MenuItem value="local">
                 {t('profiles.modals.profileForm.types.local')}
@@ -319,31 +392,99 @@ export function ProfileViewer({ onChange, ref }: ProfileViewerProps) {
 
       {isRemote && (
         <>
-          <Controller
-            name="url"
-            control={control}
-            render={({ field }) => (
+          {isAccount && (
+            <>
+              <Controller
+                name="account.server_url"
+                control={control}
+                render={({ field }) => (
+                  <TextField
+                    {...text}
+                    {...field}
+                    value={field.value ?? ''}
+                    required
+                    label={t('profiles.modals.profileForm.account.server')}
+                    helperText={t(
+                      'profiles.modals.profileForm.account.serverHint',
+                    )}
+                  />
+                )}
+              />
+              <Controller
+                name="account.email"
+                control={control}
+                render={({ field }) => (
+                  <TextField
+                    {...text}
+                    {...field}
+                    value={field.value ?? ''}
+                    required
+                    label={t('profiles.modals.profileForm.account.email')}
+                  />
+                )}
+              />
               <TextField
                 {...text}
-                {...field}
-                multiline
-                label={t('profiles.modals.profileForm.fields.subscriptionUrl')}
+                value={password}
+                type="password"
+                required={openType === 'new'}
+                onChange={(event) => setPassword(event.target.value)}
+                label={t('profiles.modals.profileForm.account.password')}
+                helperText={
+                  openType === 'edit'
+                    ? t('profiles.modals.profileForm.account.passwordHint')
+                    : undefined
+                }
               />
-            )}
-          />
+              <Controller
+                name="account.client_user_agent"
+                control={control}
+                render={({ field }) => (
+                  <TextField
+                    {...text}
+                    {...field}
+                    value={field.value ?? ''}
+                    required
+                    label={t('profiles.modals.profileForm.fields.userAgent')}
+                    helperText={t(
+                      'profiles.modals.profileForm.account.setupHint',
+                    )}
+                  />
+                )}
+              />
+            </>
+          )}
+          {!isAccount && (
+            <Controller
+              name="url"
+              control={control}
+              render={({ field }) => (
+                <TextField
+                  {...text}
+                  {...field}
+                  multiline
+                  label={t(
+                    'profiles.modals.profileForm.fields.subscriptionUrl',
+                  )}
+                />
+              )}
+            />
+          )}
 
-          <Controller
-            name="option.user_agent"
-            control={control}
-            render={({ field }) => (
-              <TextField
-                {...text}
-                {...field}
-                placeholder={`clash-verge/v${version}`}
-                label={t('profiles.modals.profileForm.fields.userAgent')}
-              />
-            )}
-          />
+          {!isAccount && (
+            <Controller
+              name="option.user_agent"
+              control={control}
+              render={({ field }) => (
+                <TextField
+                  {...text}
+                  {...field}
+                  placeholder={`clash-verge/v${version}`}
+                  label={t('profiles.modals.profileForm.fields.userAgent')}
+                />
+              )}
+            />
+          )}
 
           <Controller
             name="option.timeout_seconds"
@@ -431,18 +572,20 @@ export function ProfileViewer({ onChange, ref }: ProfileViewerProps) {
             )}
           />
 
-          <Controller
-            name="option.danger_accept_invalid_certs"
-            control={control}
-            render={({ field }) => (
-              <StyledBox>
-                <InputLabel>
-                  {t('profiles.modals.profileForm.fields.acceptInvalidCerts')}
-                </InputLabel>
-                <Switch checked={field.value} {...field} color="primary" />
-              </StyledBox>
-            )}
-          />
+          {!isAccount && (
+            <Controller
+              name="option.danger_accept_invalid_certs"
+              control={control}
+              render={({ field }) => (
+                <StyledBox>
+                  <InputLabel>
+                    {t('profiles.modals.profileForm.fields.acceptInvalidCerts')}
+                  </InputLabel>
+                  <Switch checked={field.value} {...field} color="primary" />
+                </StyledBox>
+              )}
+            />
+          )}
 
           <Controller
             name="option.allow_auto_update"

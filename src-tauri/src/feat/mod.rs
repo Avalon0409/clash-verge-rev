@@ -5,6 +5,7 @@ mod core_upgrade;
 mod dns;
 mod effects;
 mod executor;
+pub(crate) mod freecat;
 mod icon;
 mod listener;
 mod profile;
@@ -24,3 +25,5 @@ pub use profile::*;
 pub use proxy::*;
 pub use tun::*;
 pub use window::*;
+
+pub(crate) use config::apply_verge_patch_locked;

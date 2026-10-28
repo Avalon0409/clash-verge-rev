@@ -144,6 +144,19 @@
           "creationRetry": "订阅创建失败，尝试使用 Clash 代理创建",
           "creationSuccess": "使用 Clash 代理创建订阅成功"
         }
+      },
+      "account": {
+        "source": "自由猫账号",
+        "server": "服务端地址",
+        "serverHint": "填写 HTTPS 登录服务地址，不是订阅下载链接",
+        "email": "账号（邮箱）",
+        "password": "密码",
+        "passwordHint": "留空使用 Keychain 中已保存的密码",
+        "setupHint": "支持 macOS 上的自由猫 3.1.0。首次配置需已安装自由猫以导入解码参数，无需运行自由猫。",
+        "loginAndSave": "登录并保存",
+        "editLogin": "账号设置 / 重新登录",
+        "defaultName": "自由猫",
+        "defaultDescription": "通过账号登录获取自由猫订阅，自动下载并解密更新"
       }
     },
     "proxiesEditor": {

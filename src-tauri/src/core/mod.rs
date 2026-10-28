@@ -1,3 +1,4 @@
+pub(crate) mod application_processes;
 pub mod auto_backup;
 pub mod autostart;
 pub mod backup;

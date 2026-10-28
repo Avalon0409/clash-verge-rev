@@ -1,3 +1,4 @@
+pub(crate) mod application_proxy;
 mod clash;
 #[allow(clippy::module_inception)]
 mod config;

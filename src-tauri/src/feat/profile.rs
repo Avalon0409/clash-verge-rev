@@ -119,6 +119,12 @@ async fn perform_profile_update(
         .and_then(|item| item.name.clone())
         .unwrap_or_else(|| String::from("UnKnown Profile"));
 
+    if let Some(account) = profiles_arc.get_item(uid)?.account.clone() {
+        let mut item = PrfItem::from_account(&account, None, None, merged_opt.as_ref()).await?;
+        profiles_update_item_safe(uid, &mut item).await?;
+        return Ok(());
+    }
+
     #[derive(Clone, Copy)]
     enum Strategy {
         Configured,

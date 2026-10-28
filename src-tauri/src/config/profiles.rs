@@ -247,6 +247,7 @@ impl IProfiles {
                 patch!(each, item, desc);
                 patch!(each, item, file);
                 patch!(each, item, url);
+                patch!(each, item, account);
                 patch!(each, item, selected);
                 patch!(each, item, latency_test_urls);
                 patch!(each, item, extra);
@@ -284,7 +285,15 @@ impl IProfiles {
             self.items = Some(vec![]);
         }
 
-        let _ = self.get_item(uid)?;
+        let current = self.get_item(uid)?;
+        if let Some(expected) = item.account.as_ref()
+            && !current
+                .account
+                .as_ref()
+                .is_some_and(|account| account.credential_id == expected.credential_id)
+        {
+            bail!("Account settings changed during the download; retry updating the subscription");
+        }
 
         if let Some(items) = self.items.as_mut() {
             for each in items.iter_mut() {

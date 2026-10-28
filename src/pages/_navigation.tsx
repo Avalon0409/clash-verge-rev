@@ -1,3 +1,4 @@
+import AppsOutlinedIcon from '@mui/icons-material/AppsOutlined'
 import DnsOutlinedIcon from '@mui/icons-material/DnsOutlined'
 import ForkRightOutlinedIcon from '@mui/icons-material/ForkRightOutlined'
 import HomeOutlinedIcon from '@mui/icons-material/HomeOutlined'
@@ -18,6 +19,7 @@ import SettingsSvg from '@/assets/image/itemicon/settings.svg?react'
 import UnlockSvg from '@/assets/image/itemicon/unlock.svg?react'
 
 import { navigationItems } from './_navigation-meta'
+import ApplicationProxyPage from './application-proxy'
 import ConnectionsPage from './connections'
 import HomePage from './home'
 import LogsPage from './logs'
@@ -49,6 +51,11 @@ export const navItems: NavigationItem[] = [
     ...navigationItems.profiles,
     icon: [<DnsOutlinedIcon key="mui" />, <ProfilesSvg key="svg" />],
     Component: ProfilePage,
+  },
+  {
+    ...navigationItems.applications,
+    icon: [<AppsOutlinedIcon key="mui" />, <AppsOutlinedIcon key="custom" />],
+    Component: ApplicationProxyPage,
   },
   {
     ...navigationItems.connections,

@@ -131,6 +131,107 @@ pub async fn create_profile(item: PrfItem, file_data: Option<String>) -> CmdResu
 }
 
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
+pub async fn save_account_profile(
+    index: Option<String>,
+    mut item: PrfItem,
+    credentials: Option<crate::feat::freecat::AccountCredentials>,
+) -> CmdResult {
+    let old = if let Some(index) = index.as_ref() {
+        Some(
+            Config::profiles()
+                .await
+                .latest_arc()
+                .get_item(index)
+                .with_error_code("PROFILE_ACCOUNT_SAVE_FAILED")?
+                .clone(),
+        )
+    } else {
+        None
+    };
+    let account = item
+        .account
+        .as_mut()
+        .ok_or_else(|| coded_error("PROFILE_ACCOUNT_SAVE_FAILED", "Account source is required"))?;
+    crate::feat::freecat::validate_account(account).with_error_code("PROFILE_ACCOUNT_SAVE_FAILED")?;
+    let old_account = old.as_ref().and_then(|item| item.account.as_ref());
+    if credentials.is_none()
+        && old_account.is_none_or(|old| old.email != account.email || old.server_url != account.server_url)
+    {
+        return Err(coded_error(
+            "PROFILE_ACCOUNT_SAVE_FAILED",
+            "Password is required for a new account or server",
+        ));
+    }
+    let stored = if let Some(old) = old_account {
+        crate::feat::freecat::read_secrets(&old.credential_id).await.ok()
+    } else {
+        None
+    };
+    let mut secrets = match (stored, credentials) {
+        (Some(secrets), Some(credentials)) => crate::feat::freecat::update_credentials(secrets, credentials),
+        (Some(secrets), None) => Ok(secrets),
+        (None, Some(credentials)) => crate::feat::freecat::prepare_secrets(credentials),
+        (None, None) => Err(anyhow::anyhow!(
+            "Stored account credentials are unavailable; enter the password again"
+        )),
+    }
+    .with_error_code("PROFILE_ACCOUNT_SAVE_FAILED")?;
+    crate::feat::freecat::require_login(&mut secrets);
+    account.credential_id = help::get_uid("account").into();
+    let account = account.clone();
+    if let Some(old) = old.as_ref() {
+        item.option = PrfOption::merge(old.option.as_ref(), item.option.as_ref());
+    }
+    let mut downloaded = PrfItem::from_account_with_secrets(
+        &account,
+        item.name.as_ref(),
+        item.desc.as_ref(),
+        item.option.as_ref(),
+        secrets,
+    )
+    .await
+    .with_error_code("PROFILE_ACCOUNT_SAVE_FAILED")?;
+    if let Some(index) = index.as_ref() {
+        let metadata = PrfItem {
+            account: downloaded.account.clone(),
+            url: downloaded.url.clone(),
+            name: downloaded.name.clone(),
+            desc: downloaded.desc.clone(),
+            option: downloaded.option.clone(),
+            ..Default::default()
+        };
+        profiles_patch_item_safe(index, &metadata)
+            .await
+            .with_error_code("PROFILE_ACCOUNT_SAVE_FAILED")?;
+        profiles::profiles_update_item_safe(index, &mut downloaded).await
+            .map_err(|_| coded_error("PROFILE_ACCOUNT_SAVE_FAILED", "Account settings were saved, but the downloaded configuration could not be saved; retry updating the subscription"))?;
+    } else {
+        profiles_append_item_safe(&mut downloaded)
+            .await
+            .with_error_code("PROFILE_ACCOUNT_SAVE_FAILED")?;
+        profiles_save_file_safe()
+            .await
+            .with_error_code("PROFILE_ACCOUNT_SAVE_FAILED")?;
+    }
+    if let Some(old) = old_account
+        && let Err(error) = crate::feat::freecat::delete_secrets(&old.credential_id).await
+    {
+        logging!(
+            warn,
+            Type::Config,
+            "Previous account credential cleanup failed: {error}"
+        );
+    }
+    logging_error!(Type::Timer, Timer::global().refresh().await);
+    let uid = index.as_ref().or(downloaded.uid.as_ref());
+    if let Some(uid) = uid {
+        handle::Handle::notify_profile_changed(uid);
+    }
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn update_profile(index: String, option: Option<PrfOption>) -> CmdResult {
     match feat::update_profile(&index, option.as_ref(), true).await {
         Ok(_) => Ok(()),
@@ -143,6 +244,13 @@ pub async fn update_profile(index: String, option: Option<PrfOption>) -> CmdResu
 
 #[tauri::command]
 pub async fn delete_profile(index: String) -> CmdResult {
+    let credential_id = Config::profiles()
+        .await
+        .latest_arc()
+        .get_item(&index)
+        .ok()
+        .and_then(|item| item.account.as_ref())
+        .map(|account| account.credential_id.clone());
     let profile_write_guard = PROFILE_WRITE_LOCK.lock().await;
 
     let profiles = Config::profiles().await;
@@ -199,6 +307,11 @@ pub async fn delete_profile(index: String) -> CmdResult {
         }
     }
     logging_error!(Type::Timer, Timer::global().refresh().await);
+    if let Some(id) = credential_id
+        && let Err(error) = crate::feat::freecat::delete_secrets(&id).await
+    {
+        logging!(warn, Type::Config, "Deleted profile credential cleanup failed: {error}");
+    }
     Ok(())
 }
 

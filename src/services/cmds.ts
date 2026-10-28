@@ -32,6 +32,14 @@ export async function createProfile(
   return invoke<void>('create_profile', { item, fileData })
 }
 
+export async function saveAccountProfile(
+  item: Partial<IProfileItem>,
+  index?: string,
+  credentials?: { password: string },
+) {
+  return invoke<void>('save_account_profile', { item, index, credentials })
+}
+
 export async function viewProfile(index: string) {
   return invoke<void>('view_profile', { index })
 }

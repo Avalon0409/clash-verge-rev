@@ -80,6 +80,7 @@ interface IConfigData {
     proxy?: string
   }[]
   'proxy-groups'?: IProxyGroupItem[]
+  proxies?: { name: string }[]
 }
 
 interface IProxyItem {
@@ -186,6 +187,8 @@ interface IConnectionsItem {
     remoteDestination?: string
     process?: string
     processPath?: string
+    processId?: number
+    processStartTime?: number
   }
   upload: number
   download: number
@@ -217,7 +220,16 @@ interface IClashInfo {
   secret?: string
 }
 
+interface IProfileAccount {
+  provider: 'freecat'
+  server_url: string
+  email: string
+  client_user_agent: string
+  credential_id: string
+}
+
 interface IProfileItem {
+  account?: IProfileAccount
   latency_test_urls?: Record<string, string>
   uid: string
   type?: 'local' | 'remote' | 'merge' | 'script'
@@ -851,7 +863,48 @@ interface IProxyConfig
     | 'sudoku'
 }
 
+interface IProxyApplication {
+  name: string
+  path: string
+  kind: 'bundle' | 'executable'
+}
+
+interface IApplicationProcess {
+  pid: number
+  parent_pid: number | null
+  start_time: number
+  name: string
+  path: string
+}
+
+type IApplicationRoutingMode = 'rule' | 'proxy'
+
+interface IApplicationProcessOverride {
+  pid: number
+  start_time: number
+  enabled: boolean
+  routing_mode?: IApplicationRoutingMode
+  proxy: string | null
+}
+
+interface IApplicationProcessSnapshot {
+  processes: IApplicationProcess[]
+  overrides: IApplicationProcessOverride[]
+}
+
+interface IApplicationProxyEntry extends IProxyApplication {
+  enabled: boolean
+  routing_mode?: IApplicationRoutingMode
+  proxy: string | null
+}
+
+interface IApplicationProxyConfig {
+  enabled: boolean
+  applications: IApplicationProxyEntry[]
+}
+
 interface IVergeConfig {
+  application_proxy?: IApplicationProxyConfig
   app_log_level?: 'trace' | 'debug' | 'info' | 'warn' | 'error' | string
   app_log_max_size?: number // KB
   app_log_max_count?: number

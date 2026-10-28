@@ -1,4 +1,5 @@
 use crate::core::notify::NoticeStatus;
+mod application_proxy;
 mod chain;
 pub mod field;
 mod merge;
@@ -36,6 +37,7 @@ struct ConfigValues {
     clash_config: Mapping,
     clash_core: Option<String>,
     enable_tun: bool,
+    application_proxy: Option<crate::config::application_proxy::ApplicationProxyConfig>,
     enable_builtin: bool,
     socks_enabled: bool,
     http_enabled: bool,
@@ -125,6 +127,7 @@ async fn get_config_values(profile_uid: &str) -> ConfigValues {
         ..
     } = **verge_arc;
     let enable_external_controller = enable_external_controller.unwrap_or(false);
+    let application_proxy = verge_arc.application_proxy.clone();
     let dns_settings = verge_arc.dns_settings_for(profile_uid);
     let dns_override_confirmation = dns_settings.confirmation;
 
@@ -150,6 +153,7 @@ async fn get_config_values(profile_uid: &str) -> ConfigValues {
         clash_config,
         clash_core,
         enable_tun,
+        application_proxy,
         enable_builtin,
         socks_enabled,
         http_enabled,
@@ -881,6 +885,7 @@ pub async fn enhance(
         clash_config,
         clash_core,
         enable_tun,
+        application_proxy,
         enable_builtin,
         socks_enabled,
         http_enabled,
@@ -962,6 +967,7 @@ pub async fn enhance(
     let config = ensure_lan_bind_address(config);
 
     let config = cleanup_proxy_groups(config);
+    let config = application_proxy::use_application_proxy(config, application_proxy.as_ref())?;
     let config = use_sort(config);
 
     let mut exists_keys_set = HashSet::new();

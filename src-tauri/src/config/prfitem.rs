@@ -27,6 +27,15 @@ pub(super) fn normalize_profile_home_url(raw: &str) -> Option<String> {
     Some(url.to_string().into())
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct PrfAccount {
+    pub provider: String,
+    pub server_url: String,
+    pub email: String,
+    pub client_user_agent: String,
+    pub credential_id: String,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct PrfItem {
     pub uid: Option<String>,
@@ -44,6 +53,9 @@ pub struct PrfItem {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub account: Option<PrfAccount>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub selected: Option<Vec<PrfSelected>>,
@@ -153,6 +165,10 @@ impl PrfItem {
             .ok_or_else(|| anyhow::anyhow!("type should not be null"))?;
         match itype.as_str() {
             "remote" => {
+                if let Some(account) = item.account.as_ref() {
+                    return Self::from_account(account, item.name.as_ref(), item.desc.as_ref(), item.option.as_ref())
+                        .await;
+                }
                 let url = item
                     .url
                     .as_ref()
@@ -220,6 +236,7 @@ impl PrfItem {
             desc: Some(desc),
             file: Some(file),
             url: None,
+            account: None,
             latency_test_urls: None,
             selected: None,
             extra: None,
@@ -247,16 +264,8 @@ impl PrfItem {
         let with_proxy = option.is_some_and(|o| o.with_proxy.unwrap_or(false));
         let self_proxy = option.is_some_and(|o| o.self_proxy.unwrap_or(false));
         let accept_invalid_certs = option.is_some_and(|o| o.danger_accept_invalid_certs.unwrap_or(false));
-        let allow_auto_update = Some(allow_auto_update_enabled(option));
         let user_agent = option.and_then(|o| o.user_agent.clone());
-        let update_interval = option.and_then(|o| o.update_interval);
         let timeout = option.and_then(|o| o.timeout_seconds).unwrap_or(20);
-        let mut merge = option.and_then(|o| o.merge.clone());
-        let mut script = option.and_then(|o| o.script.clone());
-        let mut rules = option.and_then(|o| o.rules.clone());
-        let mut proxies = option.and_then(|o| o.proxies.clone());
-        let mut groups = option.and_then(|o| o.groups.clone());
-
         let proxy_type = if self_proxy {
             ProxyType::Localhost
         } else if with_proxy {
@@ -284,6 +293,24 @@ impl PrfItem {
             }
         };
 
+        Self::from_response(url.as_str(), name, desc, option, resp).await
+    }
+
+    async fn from_response(
+        url: &str,
+        name: Option<&String>,
+        desc: Option<&String>,
+        option: Option<&PrfOption>,
+        resp: crate::utils::network::HttpResponse,
+    ) -> Result<Self> {
+        let allow_auto_update = Some(allow_auto_update_enabled(option));
+        let update_interval = option.and_then(|o| o.update_interval);
+        let mut merge = option.and_then(|o| o.merge.clone());
+        let mut script = option.and_then(|o| o.script.clone());
+        let mut rules = option.and_then(|o| o.rules.clone());
+        let mut proxies = option.and_then(|o| o.proxies.clone());
+        let mut groups = option.and_then(|o| o.groups.clone());
+        let url = fix_dirty_url(url)?;
         let status_code = resp.status();
         if !status_code.is_success() {
             bail!("failed to fetch remote profile with status {status_code}")
@@ -400,6 +427,7 @@ impl PrfItem {
             desc: desc.cloned(),
             file: Some(file),
             url: Some(url.as_str().into()),
+            account: None,
             latency_test_urls: None,
             selected: None,
             extra,
@@ -417,6 +445,31 @@ impl PrfItem {
             updated: Some(chrono::Local::now().timestamp() as usize),
             file_data: Some(data.into()),
         })
+    }
+
+    pub(crate) async fn from_account(
+        account: &PrfAccount,
+        name: Option<&String>,
+        desc: Option<&String>,
+        option: Option<&PrfOption>,
+    ) -> Result<Self> {
+        let secrets = crate::feat::freecat::read_secrets(&account.credential_id).await?;
+        Self::from_account_with_secrets(account, name, desc, option, secrets).await
+    }
+
+    pub(crate) async fn from_account_with_secrets(
+        account: &PrfAccount,
+        name: Option<&String>,
+        desc: Option<&String>,
+        option: Option<&PrfOption>,
+        secrets: crate::feat::freecat::AccountSecrets,
+    ) -> Result<Self> {
+        let (response, secrets) = crate::feat::freecat::fetch(account, option, secrets).await?;
+        let mut item = Self::from_response(&account.server_url, name, desc, option, response).await?;
+        item.account = Some(account.clone());
+        item.option = PrfOption::merge(item.option.as_ref(), option);
+        crate::feat::freecat::write_secrets(&account.credential_id, &secrets).await?;
+        Ok(item)
     }
 
     pub(super) fn from_merge(uid: Option<String>) -> Self {

@@ -18,7 +18,7 @@ pub struct HttpResponse {
 }
 
 impl HttpResponse {
-    const fn new(status: StatusCode, headers: HeaderMap, body: String) -> Self {
+    pub(crate) const fn new(status: StatusCode, headers: HeaderMap, body: String) -> Self {
         Self { status, headers, body }
     }
 
@@ -62,10 +62,15 @@ impl NetworkManager {
         accept_invalid_certs: bool,
         timeout_secs: Option<u64>,
         tls_root_mode: TlsRootMode,
+        allow_redirects: bool,
     ) -> Result<Client> {
         let mut builder = Client::builder()
             .tls_backend_rustls()
-            .redirect(reqwest::redirect::Policy::limited(10))
+            .redirect(if allow_redirects {
+                reqwest::redirect::Policy::limited(10)
+            } else {
+                reqwest::redirect::Policy::none()
+            })
             .tcp_keepalive(Duration::from_secs(60))
             .pool_max_idle_per_host(0)
             .pool_idle_timeout(None);
@@ -190,6 +195,7 @@ impl NetworkManager {
                 user_agent,
                 accept_invalid_certs,
                 tls_root_mode,
+                true,
             )
             .await?;
 
@@ -225,6 +231,7 @@ impl NetworkManager {
         user_agent: Option<String>,
         accept_invalid_certs: bool,
         tls_root_mode: TlsRootMode,
+        allow_redirects: bool,
     ) -> Result<Client> {
         let proxy_url: Option<std::string::String> = match proxy_type {
             ProxyType::None => None,
@@ -253,7 +260,14 @@ impl NetworkManager {
             );
         }
 
-        self.build_client(proxy_url, headers, accept_invalid_certs, timeout_secs, tls_root_mode)
+        self.build_client(
+            proxy_url,
+            headers,
+            accept_invalid_certs,
+            timeout_secs,
+            tls_root_mode,
+            allow_redirects,
+        )
     }
 
     pub async fn get(
@@ -294,6 +308,73 @@ impl NetworkManager {
         }
     }
 
+    pub(crate) async fn account_json(
+        &self,
+        url: &str,
+        body: Option<&serde_json::Value>,
+        authorization: Option<&str>,
+        proxy_type: ProxyType,
+        timeout_secs: Option<u64>,
+        user_agent: String,
+    ) -> Result<(StatusCode, serde_json::Value)> {
+        let request = |tls_root_mode| {
+            let user_agent = user_agent.clone();
+            async move {
+                let client = self
+                    .create_request_with_tls_mode(
+                        proxy_type,
+                        Some(timeout_secs.unwrap_or(20)),
+                        Some(user_agent),
+                        false,
+                        tls_root_mode,
+                        false,
+                    )
+                    .await?;
+                let mut builder = if let Some(body) = body {
+                    client.post(url).json(body)
+                } else {
+                    client.get(url)
+                };
+                if let Some(authorization) = authorization {
+                    let mut value = HeaderValue::from_str(authorization)
+                        .map_err(|_| anyhow::anyhow!("Invalid account session header"))?;
+                    value.set_sensitive(true);
+                    builder = builder.header(reqwest::header::AUTHORIZATION, value);
+                }
+                builder
+                    .send()
+                    .await
+                    .map_err(|error| Self::context_reqwest_error(error.without_url(), "Account request failed"))
+            }
+        };
+        let mut response = match request(TlsRootMode::PlatformVerifier).await {
+            Ok(response) => response,
+            Err(error) if Self::should_retry_with_static_webpki_roots(&error) => {
+                request(TlsRootMode::StaticWebpkiRoots)
+                    .await
+                    .map_err(|_| anyhow::anyhow!("Account request failed after TLS certificate fallback"))?
+            }
+            Err(_) => anyhow::bail!("Account network request failed"),
+        };
+        let status = response.status();
+        let mut bytes = Vec::new();
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|_| anyhow::anyhow!("Failed to read account response"))?
+        {
+            if bytes.len() + chunk.len() > 1024 * 1024 {
+                anyhow::bail!("Account response exceeds the size limit");
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        if !status.is_success() {
+            return Ok((status, serde_json::Value::Null));
+        }
+        let data = serde_json::from_slice(&bytes).map_err(|_| anyhow::anyhow!("Account response is not valid JSON"))?;
+        Ok((status, data))
+    }
+
     async fn get_bytes_with_tls_mode(
         &self,
         url: &str,
@@ -303,7 +384,7 @@ impl NetworkManager {
         tls_root_mode: TlsRootMode,
     ) -> Result<Vec<u8>> {
         let client = self
-            .create_request_with_tls_mode(proxy_type, timeout_secs, None, false, tls_root_mode)
+            .create_request_with_tls_mode(proxy_type, timeout_secs, None, false, tls_root_mode, true)
             .await?;
 
         let mut response = client

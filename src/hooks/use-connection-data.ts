@@ -22,6 +22,8 @@ interface ConnectionMonitorData {
   downloadTotal: number
   activeConnections: IConnectionsItem[]
   closedConnections: IConnectionsItem[]
+  sampledAt?: number
+  sampleIntervalMs?: number
 }
 
 interface ConnectionSummaryPayload {
@@ -65,7 +67,9 @@ const sameMetadata = (left: ConnectionMetadata, right: ConnectionMetadata) =>
   metadataValue(left.remoteDestination) ===
     metadataValue(right.remoteDestination) &&
   metadataValue(left.process) === metadataValue(right.process) &&
-  metadataValue(left.processPath) === metadataValue(right.processPath)
+  metadataValue(left.processPath) === metadataValue(right.processPath) &&
+  left.processId === right.processId &&
+  left.processStartTime === right.processStartTime
 
 const normalizeMetadata = (
   metadata: ConnectionMetadata,
@@ -84,6 +88,8 @@ const normalizeMetadata = (
     remoteDestination: metadata.remoteDestination || '',
     process: metadata.process || '',
     processPath: metadata.processPath || '',
+    processId: metadata.processId,
+    processStartTime: metadata.processStartTime,
   }
 }
 
@@ -227,7 +233,16 @@ const flushPendingMessage = () => {
 
   lastFlushAt = Date.now()
 
-  connectionData = mergeConnectionSnapshot(payload, connectionData)
+  const sampledAt = performance.now()
+  const sampleIntervalMs =
+    connectionData.sampledAt === undefined
+      ? undefined
+      : sampledAt - connectionData.sampledAt
+  connectionData = {
+    ...mergeConnectionSnapshot(payload, connectionData),
+    sampledAt,
+    sampleIntervalMs,
+  }
   notifyConnectionListeners()
 }
 

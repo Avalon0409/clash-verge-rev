@@ -9,7 +9,8 @@
         "rules": "Regras",
         "logs": "Logs",
         "unlock": "Teste",
-        "settings": "Ajustes"
+        "settings": "Ajustes",
+        "applications": "Application Proxy"
       },
       "menu": {
         "reorderMode": "Modo de reordenação do menu",

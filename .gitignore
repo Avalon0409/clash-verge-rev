@@ -1,4 +1,6 @@
 node_modules
+!src-tauri/src/config/
+!src-tauri/src/config/application_proxy.rs
 .pnpm-store
 .DS_Store
 dist

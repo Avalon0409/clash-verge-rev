@@ -205,6 +205,7 @@ export interface TranslationResources {
             unlock: string
           }
           tabs: {
+            applications: string
             connections: string
             home: string
             logs: string
@@ -372,6 +373,19 @@ export interface TranslationResources {
           title: string
         }
         profileForm: {
+          account: {
+            defaultDescription: string
+            defaultName: string
+            editLogin: string
+            email: string
+            loginAndSave: string
+            password: string
+            passwordHint: string
+            server: string
+            serverHint: string
+            setupHint: string
+            source: string
+          }
           errors: {
             saveFailed: string
             typeRequired: string
@@ -607,6 +621,75 @@ export interface TranslationResources {
       }
     }
     rules: {
+      applicationProxy: {
+        actions: string
+        active: string
+        add: string
+        addProcess: string
+        appColumn: string
+        application: string
+        cancel: string
+        chooseOutbound: string
+        confirmEnable: string
+        connectionHelp: string
+        connections: string
+        description: string
+        disabledArea: string
+        disconnect: string
+        disconnected: string
+        disconnectFailed: string
+        dropDisable: string
+        dropEnable: string
+        duplicate: string
+        empty: string
+        enable: string
+        enableApplication: string
+        enabledArea: string
+        enabledEmpty: string
+        filteredEmpty: string
+        followParent: string
+        followSubscription: string
+        inactive: string
+        inherited: string
+        lastTest: string
+        listFailed: string
+        missing: string
+        missingHelp: string
+        noConnections: string
+        notConfigured: string
+        originalMode: string
+        outbound: string
+        overview: string
+        path: string
+        pathHelp: string
+        paused: string
+        pausedHelp: string
+        process: string
+        processCount: string
+        proxy: string
+        proxyMode: string
+        refresh: string
+        remove: string
+        reset: string
+        routingMode: string
+        ruleMode: string
+        sampling: string
+        saved: string
+        search: string
+        selectBeforeEnable: string
+        selectedMode: string
+        selectedNode: string
+        serviceRequired: string
+        settings: string
+        speedColumn: string
+        speedHelp: string
+        statusColumn: string
+        switchColumn: string
+        temporary: string
+        testFailed: string
+        title: string
+        untested: string
+      }
       feedback: {
         notifications: {
           provider: {

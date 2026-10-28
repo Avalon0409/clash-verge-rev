@@ -93,6 +93,7 @@ async fn resolve_setup() {
         init_silent_updater(),
     );
 
+    crate::core::application_processes::start_cleanup();
     Handle::refresh_clash();
     refresh_tray_menu().await;
     resolve_done();
