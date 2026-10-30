@@ -48,7 +48,9 @@ export type ApplicationProxyChange =
       proxy: string | null
       enabled: boolean
       routing_mode?: IApplicationRoutingMode
+      profile_uid?: string | null
     }
+  | { type: 'set-profile'; path: string; profile_uid: string | null }
   | { type: 'set-enabled'; path: string; enabled: boolean }
   | {
       type: 'set-routing-mode'
@@ -112,3 +114,12 @@ export const disconnectApplicationConnections = (
     },
     { id: 'disconnect-application', errorNotice: false },
   )
+
+export interface ApplicationProfileOutbound {
+  name: string
+  value: string
+}
+export const listApplicationProfileOutbounds = (uid: string) =>
+  invoke<ApplicationProfileOutbound[]>('list_application_profile_outbounds', {
+    uid,
+  })

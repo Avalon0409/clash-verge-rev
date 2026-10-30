@@ -189,6 +189,7 @@ interface IConnectionsItem {
     processPath?: string
     processId?: number
     processStartTime?: number
+    processAncestors?: { pid: number; startTime: number; path: string }[]
   }
   upload: number
   download: number
@@ -884,6 +885,7 @@ interface IApplicationProcessOverride {
   start_time: number
   enabled: boolean
   routing_mode?: IApplicationRoutingMode
+  profile_uid?: string | null
   proxy: string | null
 }
 
@@ -895,6 +897,7 @@ interface IApplicationProcessSnapshot {
 interface IApplicationProxyEntry extends IProxyApplication {
   enabled: boolean
   routing_mode?: IApplicationRoutingMode
+  profile_uid?: string | null
   proxy: string | null
 }
 

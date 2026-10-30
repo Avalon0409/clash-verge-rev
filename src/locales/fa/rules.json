@@ -82,7 +82,7 @@
   "applicationProxy": {
     "title": "Application Proxy",
     "enable": "Only route selected applications",
-    "description": "Enabled applications follow subscription rules by default. Direct and reject decisions are preserved; proxy decisions use the application-selected outbound, or the subscription outbound when none is selected. Proxy mode sends all traffic to the selected outbound. Disabled applications connect directly.",
+    "description": "Enabled applications follow subscription rules by default. Direct and reject decisions are preserved; proxy decisions use the application-selected outbound, or the subscription outbound when none is selected. Proxy mode sends all traffic to the selected outbound. Disabled or unconfigured applications follow global routing. Opening this switch also enables TUN; when it is off, this page is read-only and global routing applies.",
     "settings": "Settings",
     "serviceRequired": "TUN requires an available system service. Install or repair the service in Settings before enabling this mode.",
     "active": "TUN is enabled and the core is in rule mode. Actual connection routes are shown below.",
@@ -102,7 +102,7 @@
     "noConnections": "No active connections observed",
     "disconnect": "Disconnect",
     "disconnected": "Application connections disconnected",
-    "connectionHelp": "Switches affect new connections. Disconnect existing application connections to reconnect with the new policy; this may interrupt downloads or sessions. Unidentified processes use the default direct rule. A proxy group may itself select a direct outbound; the displayed connection route is authoritative.",
+    "connectionHelp": "Switches affect new connections. Disconnect existing application connections to reconnect with the new policy; this may interrupt downloads or sessions. Unidentified processes follow global routing. A proxy group may itself select a direct outbound; the displayed connection route is authoritative.",
     "disconnectFailed": "Failed to disconnect {{count}} connections; other connections may already be disconnected.",
     "saved": "Application settings saved",
     "duplicate": "This application is already configured",
@@ -146,6 +146,22 @@
     "ruleMode": "Rules",
     "proxyMode": "Proxy",
     "routingMode": "Routing mode",
-    "followSubscription": "Use subscription outbound"
+    "followSubscription": "Use subscription outbound",
+    "processDialogHint": "Follow parent settings by default. Overrides expire when the process exits.",
+    "processDialogClose": "Close",
+    "connectedProcesses": "Connected: {{count}}",
+    "temporaryOverrides": "Temporary overrides: {{count}}",
+    "processSearch": "Search process name or PID",
+    "noMatchingProcesses": "No matching processes.",
+    "noProcesses": "No running processes for this application.",
+    "subscription": "Subscription",
+    "globalSubscription": "Follow global subscription",
+    "missingSubscription": "Subscription removed",
+    "subscriptionRulesHint": "Rules follow the selected subscription. Switching subscriptions clears the previous node selection. Leave the node blank in Rules mode to use this subscription’s routing groups.",
+    "subscriptionReadFailed": "Unable to read subscription configuration",
+    "viewConnections": "View connections",
+    "runningOnly": "Running only",
+    "runningOnlyHelp": "Show applications with running processes, even when they have no network connections.",
+    "runningEmpty": "No running applications match the filters."
   }
 }

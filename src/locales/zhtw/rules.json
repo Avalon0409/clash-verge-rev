@@ -82,7 +82,7 @@
   "applicationProxy": {
     "title": "Application Proxy",
     "enable": "仅对指定应用分流",
-    "description": "规则模式先匹配订阅规则：直连和拒绝照常处理，需要代理时走该应用选定节点；未选节点时沿用订阅出口。代理模式全部流量走选定节点。关闭的应用默认直连。",
+    "description": "规则模式先匹配订阅规则：直连和拒绝照常处理，需要代理时走该应用选定节点；未选节点时沿用订阅出口。代理模式全部流量走选定节点。关闭或未配置的应用沿用全局配置。 打开总开关会同步开启 TUN；关闭后本页不可配置，恢复全局分流。",
     "settings": "Settings",
     "serviceRequired": "TUN requires an available system service. Install or repair the service in Settings before enabling this mode.",
     "active": "TUN is enabled and the core is in rule mode. Actual connection routes are shown below.",
@@ -102,7 +102,7 @@
     "noConnections": "No active connections observed",
     "disconnect": "Disconnect",
     "disconnected": "Application connections disconnected",
-    "connectionHelp": "Switches affect new connections. Disconnect existing application connections to reconnect with the new policy; this may interrupt downloads or sessions. Unidentified processes use the default direct rule. A proxy group may itself select a direct outbound; the displayed connection route is authoritative.",
+    "connectionHelp": "Switches affect new connections. Disconnect existing application connections to reconnect with the new policy; this may interrupt downloads or sessions. Unidentified processes follow global routing. A proxy group may itself select a direct outbound; the displayed connection route is authoritative.",
     "disconnectFailed": "Failed to disconnect {{count}} connections; other connections may already be disconnected.",
     "saved": "Application settings saved",
     "duplicate": "This application is already configured",
@@ -146,6 +146,22 @@
     "ruleMode": "规则",
     "proxyMode": "代理",
     "routingMode": "分流模式",
-    "followSubscription": "沿用订阅代理出口"
+    "followSubscription": "沿用订阅代理出口",
+    "processDialogHint": "默认跟随父进程；单独修改为临时覆盖，进程退出后失效。",
+    "processDialogClose": "关闭",
+    "connectedProcesses": "有连接：{{count}}",
+    "temporaryOverrides": "临时覆盖：{{count}}",
+    "processSearch": "搜索进程名称或 PID",
+    "noMatchingProcesses": "没有符合搜索条件的进程。",
+    "noProcesses": "当前应用没有正在运行的进程。",
+    "subscription": "订阅来源",
+    "globalSubscription": "跟随全局当前订阅",
+    "missingSubscription": "订阅已删除",
+    "subscriptionRulesHint": "规则跟随所选订阅。切换订阅会清除原节点选择；规则模式不选节点时，沿用此订阅的分流出口。",
+    "subscriptionReadFailed": "无法读取订阅配置",
+    "viewConnections": "查看连接",
+    "runningOnly": "僅執行中",
+    "runningOnlyHelp": "只顯示有執行中處理程序的應用程式，即使目前沒有網路連線。",
+    "runningEmpty": "沒有符合條件的執行中應用程式。"
   }
 }

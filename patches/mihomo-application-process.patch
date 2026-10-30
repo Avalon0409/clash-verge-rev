@@ -1,89 +1,43 @@
---- a/constant/metadata.go
-+++ b/constant/metadata.go
-@@ -187,31 +187,41 @@
- }
- 
- // Metadata is used to store connection address
-+type ProcessIdentity struct {
-+	PID       uint32 `json:"pid"`
-+	StartTime uint64 `json:"startTime"`
-+	Path      string `json:"path"`
-+}
-+
- type Metadata struct {
--	NetWork      NetWork    `json:"network"`
--	Type         Type       `json:"type"`
--	SrcIP        netip.Addr `json:"sourceIP"`
--	DstIP        netip.Addr `json:"destinationIP"`
--	SrcGeoIP     []string   `json:"sourceGeoIP"`      // can be nil if never queried, empty slice if got no result
--	DstGeoIP     []string   `json:"destinationGeoIP"` // can be nil if never queried, empty slice if got no result
--	SrcIPASN     string     `json:"sourceIPASN"`
--	DstIPASN     string     `json:"destinationIPASN"`
--	SrcPort      uint16     `json:"sourcePort,string"`      // `,string` is used to compatible with old version json output
--	DstPort      uint16     `json:"destinationPort,string"` // `,string` is used to compatible with old version json output
--	InIP         netip.Addr `json:"inboundIP"`
--	InPort       uint16     `json:"inboundPort,string"` // `,string` is used to compatible with old version json output
--	InName       string     `json:"inboundName"`
--	InUser       string     `json:"inboundUser"`
--	RematchName  string     `json:"rematchName"`
--	Host         string     `json:"host"`
--	DNSMode      DNSMode    `json:"dnsMode"`
--	Uid          uint32     `json:"uid"`
--	Process      string     `json:"process"`
--	ProcessPath  string     `json:"processPath"`
--	SpecialProxy string     `json:"specialProxy"`
--	SpecialRules string     `json:"specialRules"`
--	RemoteDst    string     `json:"remoteDestination"`
--	DSCP         uint8      `json:"dscp"`
-+	NetWork              NetWork           `json:"network"`
-+	Type                 Type              `json:"type"`
-+	SrcIP                netip.Addr        `json:"sourceIP"`
-+	DstIP                netip.Addr        `json:"destinationIP"`
-+	SrcGeoIP             []string          `json:"sourceGeoIP"`      // can be nil if never queried, empty slice if got no result
-+	DstGeoIP             []string          `json:"destinationGeoIP"` // can be nil if never queried, empty slice if got no result
-+	SrcIPASN             string            `json:"sourceIPASN"`
-+	DstIPASN             string            `json:"destinationIPASN"`
-+	SrcPort              uint16            `json:"sourcePort,string"`      // `,string` is used to compatible with old version json output
-+	DstPort              uint16            `json:"destinationPort,string"` // `,string` is used to compatible with old version json output
-+	InIP                 netip.Addr        `json:"inboundIP"`
-+	InPort               uint16            `json:"inboundPort,string"` // `,string` is used to compatible with old version json output
-+	InName               string            `json:"inboundName"`
-+	InUser               string            `json:"inboundUser"`
-+	RematchName          string            `json:"rematchName"`
-+	Host                 string            `json:"host"`
-+	DNSMode              DNSMode           `json:"dnsMode"`
-+	Uid                  uint32            `json:"uid"`
-+	Process              string            `json:"process"`
-+	ProcessPath          string            `json:"processPath"`
-+	ProcessID            uint32            `json:"processId"`
-+	ProcessStartTime     uint64            `json:"processStartTime"`
-+	ProcessAncestors     []ProcessIdentity `json:"processAncestors,omitempty"`
-+	ApplicationRuleProxy string            `json:"-"`
-+	SpecialProxy         string            `json:"specialProxy"`
-+	SpecialRules         string            `json:"specialRules"`
-+	RemoteDst            string            `json:"remoteDestination"`
-+	DSCP                 uint8             `json:"dscp"`
- 
- 	RawSrcAddr net.Addr `json:"-"`
- 	RawDstAddr net.Addr `json:"-"`
---- a/constant/rule.go
-+++ b/constant/rule.go
-@@ -40,12 +40,15 @@
- 	AND
- 	OR
- 	NOT
-+	ApplicationProcess
- )
- 
- type RuleType int
- 
- func (rt RuleType) String() string {
- 	switch rt {
-+	case ApplicationProcess:
-+		return "ApplicationProcess"
- 	case Domain:
- 		return "Domain"
- 	case DomainSuffix:
+--- a/adapter/outboundgroup/groupbase.go
++++ b/adapter/outboundgroup/groupbase.go
+@@ -154,7 +154,7 @@
+ 			for _, filterReg := range gb.filterRegs {
+ 				for _, p := range pd.Proxies() {
+ 					name := p.Name()
+-					if mat, _ := filterReg.MatchString(name); mat {
++					if mat, _ := filterReg.MatchString(C.ApplicationProxyName(name)); mat {
+ 						if _, ok := proxiesSet[name]; !ok {
+ 							proxiesSet[name] = struct{}{}
+ 							newProxies = append(newProxies, p)
+@@ -175,7 +175,7 @@
+ 		for _, filterReg := range gb.filterRegs {
+ 			for _, p := range proxies {
+ 				name := p.Name()
+-				if mat, _ := filterReg.MatchString(name); mat {
++				if mat, _ := filterReg.MatchString(C.ApplicationProxyName(name)); mat {
+ 					if _, ok := proxiesSet[name]; !ok {
+ 						proxiesSet[name] = struct{}{}
+ 						newProxies = append(newProxies, p)
+@@ -199,7 +199,7 @@
+ 		for _, p := range proxies {
+ 			name := p.Name()
+ 			for _, excludeFilterReg := range gb.excludeFilterRegs {
+-				if mat, _ := excludeFilterReg.MatchString(name); mat {
++				if mat, _ := excludeFilterReg.MatchString(C.ApplicationProxyName(name)); mat {
+ 					continue LOOP1
+ 				}
+ 			}
+--- a/adapter/provider/healthcheck.go
++++ b/adapter/provider/healthcheck.go
+@@ -171,7 +171,7 @@
+ 	for _, proxy := range hc.proxies {
+ 		// skip proxies that do not require health check
+ 		if filterReg != nil {
+-			if match, _ := filterReg.MatchString(proxy.Name()); !match {
++			if match, _ := filterReg.MatchString(C.ApplicationProxyName(proxy.Name())); !match {
+ 				continue
+ 			}
+ 		}
 --- a/component/process/process.go
 +++ b/component/process/process.go
 @@ -36,3 +36,15 @@
@@ -201,19 +155,6 @@
 +	return info, nil
 +}
 --- /dev/null
-+++ b/component/process/process_info_other.go
-@@ -0,0 +1,10 @@
-+//go:build !darwin
-+
-+package process
-+
-+import "net/netip"
-+
-+func findProcessInfo(network string, ip netip.Addr, port int) (Info, error) {
-+	uid, path, err := findProcessName(network, ip, port)
-+	return Info{UID: uid, Path: path}, err
-+}
---- /dev/null
 +++ b/component/process/process_info_darwin_test.go
 @@ -0,0 +1,34 @@
 +package process
@@ -250,72 +191,150 @@
 +		t.Fatalf("inconsistent process identity: %v", err)
 +	}
 +}
---- a/tunnel/tunnel.go
-+++ b/tunnel/tunnel.go
-@@ -353,13 +353,16 @@
- 				attemptProcessLookup = false
- 				if !features.CMFA {
- 					// normal check for process
--					uid, path, err := process.FindProcessName(metadata.NetWork.String(), metadata.SrcIP, int(metadata.SrcPort))
-+					info, err := process.FindProcessInfo(metadata.NetWork.String(), metadata.SrcIP, int(metadata.SrcPort))
- 					if err != nil {
- 						log.Debugln("[Process] find process error for %s: %v", metadata.String(), err)
- 					} else {
--						metadata.Process = filepath.Base(path)
--						metadata.ProcessPath = path
--						metadata.Uid = uid
-+						metadata.Process = filepath.Base(info.Path)
-+						metadata.ProcessPath = info.Path
-+						metadata.Uid = info.UID
-+						metadata.ProcessID = info.PID
-+						metadata.ProcessStartTime = info.StartTime
-+						metadata.ProcessAncestors = info.Ancestors
+--- /dev/null
++++ b/component/process/process_info_other.go
+@@ -0,0 +1,10 @@
++//go:build !darwin
++
++package process
++
++import "net/netip"
++
++func findProcessInfo(network string, ip netip.Addr, port int) (Info, error) {
++	uid, path, err := findProcessName(network, ip, port)
++	return Info{UID: uid, Path: path}, err
++}
+--- a/constant/metadata.go
++++ b/constant/metadata.go
+@@ -1,11 +1,13 @@
+ package constant
  
- 						if pkg, err := process.FindPackageName(metadata); err == nil { // for android (not CMFA) package names
- 							metadata.Process = pkg
-@@ -681,7 +684,28 @@
- 					}
- 				}
+ import (
++	"encoding/base64"
+ 	"encoding/json"
+ 	"fmt"
+ 	"net"
+ 	"net/netip"
+ 	"strconv"
++	"strings"
+ )
  
-+				applicationOverride := false
-+				if metadata.ApplicationRuleProxy != "" {
-+					preserve := false
-+					for leaf := adapter; leaf != nil; leaf = leaf.Unwrap(metadata, false) {
-+						if leaf.Type() == C.Direct || leaf.Type() == C.Reject || leaf.Type() == C.RejectDrop {
-+							preserve = true
-+							break
-+						}
-+					}
-+					if !preserve {
-+						selected, exists := proxies[metadata.ApplicationRuleProxy]
-+						if !exists {
-+							selected = proxies["REJECT"]
-+						}
-+						adapter = selected
-+						applicationOverride = true
-+					}
-+				}
- 				if metadata.NetWork == C.UDP && !adapter.SupportUDP() {
-+					if applicationOverride {
-+						return proxies["REJECT"], rule, nil
-+					}
- 					log.Debugln("%s UDP is not supported", adapter.Name())
- 					continue
- 				}
---- a/rules/parser.go
-+++ b/rules/parser.go
-@@ -15,6 +15,8 @@
- 	}
+ // SOCKS address types as defined in RFC 1928 section 5.
+@@ -187,31 +189,42 @@
+ }
  
- 	switch tp {
-+	case "APPLICATION-PROCESS":
-+		parsed, parseErr = RC.NewApplicationProcess(payload, target)
- 	case "DOMAIN":
- 		parsed = RC.NewDomain(payload, target)
- 	case "DOMAIN-SUFFIX":
+ // Metadata is used to store connection address
++type ProcessIdentity struct {
++	PID       uint32 `json:"pid"`
++	StartTime uint64 `json:"startTime"`
++	Path      string `json:"path"`
++}
++
+ type Metadata struct {
+-	NetWork      NetWork    `json:"network"`
+-	Type         Type       `json:"type"`
+-	SrcIP        netip.Addr `json:"sourceIP"`
+-	DstIP        netip.Addr `json:"destinationIP"`
+-	SrcGeoIP     []string   `json:"sourceGeoIP"`      // can be nil if never queried, empty slice if got no result
+-	DstGeoIP     []string   `json:"destinationGeoIP"` // can be nil if never queried, empty slice if got no result
+-	SrcIPASN     string     `json:"sourceIPASN"`
+-	DstIPASN     string     `json:"destinationIPASN"`
+-	SrcPort      uint16     `json:"sourcePort,string"`      // `,string` is used to compatible with old version json output
+-	DstPort      uint16     `json:"destinationPort,string"` // `,string` is used to compatible with old version json output
+-	InIP         netip.Addr `json:"inboundIP"`
+-	InPort       uint16     `json:"inboundPort,string"` // `,string` is used to compatible with old version json output
+-	InName       string     `json:"inboundName"`
+-	InUser       string     `json:"inboundUser"`
+-	RematchName  string     `json:"rematchName"`
+-	Host         string     `json:"host"`
+-	DNSMode      DNSMode    `json:"dnsMode"`
+-	Uid          uint32     `json:"uid"`
+-	Process      string     `json:"process"`
+-	ProcessPath  string     `json:"processPath"`
+-	SpecialProxy string     `json:"specialProxy"`
+-	SpecialRules string     `json:"specialRules"`
+-	RemoteDst    string     `json:"remoteDestination"`
+-	DSCP         uint8      `json:"dscp"`
++	NetWork              NetWork           `json:"network"`
++	Type                 Type              `json:"type"`
++	SrcIP                netip.Addr        `json:"sourceIP"`
++	DstIP                netip.Addr        `json:"destinationIP"`
++	SrcGeoIP             []string          `json:"sourceGeoIP"`      // can be nil if never queried, empty slice if got no result
++	DstGeoIP             []string          `json:"destinationGeoIP"` // can be nil if never queried, empty slice if got no result
++	SrcIPASN             string            `json:"sourceIPASN"`
++	DstIPASN             string            `json:"destinationIPASN"`
++	SrcPort              uint16            `json:"sourcePort,string"`      // `,string` is used to compatible with old version json output
++	DstPort              uint16            `json:"destinationPort,string"` // `,string` is used to compatible with old version json output
++	InIP                 netip.Addr        `json:"inboundIP"`
++	InPort               uint16            `json:"inboundPort,string"` // `,string` is used to compatible with old version json output
++	InName               string            `json:"inboundName"`
++	InUser               string            `json:"inboundUser"`
++	RematchName          string            `json:"rematchName"`
++	Host                 string            `json:"host"`
++	DNSMode              DNSMode           `json:"dnsMode"`
++	Uid                  uint32            `json:"uid"`
++	Process              string            `json:"process"`
++	ProcessPath          string            `json:"processPath"`
++	ProcessID            uint32            `json:"processId"`
++	ProcessStartTime     uint64            `json:"processStartTime"`
++	ProcessAncestors     []ProcessIdentity `json:"processAncestors,omitempty"`
++	ApplicationRuleProxy string            `json:"-"`
++	ApplicationRuleSet   string            `json:"-"`
++	SpecialProxy         string            `json:"specialProxy"`
++	SpecialRules         string            `json:"specialRules"`
++	RemoteDst            string            `json:"remoteDestination"`
++	DSCP                 uint8             `json:"dscp"`
+ 
+ 	RawSrcAddr net.Addr `json:"-"`
+ 	RawDstAddr net.Addr `json:"-"`
+@@ -374,3 +387,16 @@
+ 	m.SrcIPASN, m.DstIPASN = m.DstIPASN, m.SrcIPASN
+ 	m.SrcGeoIP, m.DstGeoIP = m.DstGeoIP, m.SrcGeoIP
+ }
++
++// Application subscription namespaces are internal; filters match original node names.
++func ApplicationProxyName(name string) string {
++	if strings.HasPrefix(name, "__ap_") {
++		encoded, original, found := strings.Cut(name[len("__ap_"):], ":")
++		if found {
++			if _, err := base64.RawURLEncoding.DecodeString(encoded); err == nil {
++				return original
++			}
++		}
++	}
++	return name
++}
+--- a/constant/rule.go
++++ b/constant/rule.go
+@@ -40,12 +40,15 @@
+ 	AND
+ 	OR
+ 	NOT
++	ApplicationProcess
+ )
+ 
+ type RuleType int
+ 
+ func (rt RuleType) String() string {
+ 	switch rt {
++	case ApplicationProcess:
++		return "ApplicationProcess"
+ 	case Domain:
+ 		return "Domain"
+ 	case DomainSuffix:
+--- a/hub/route/server.go
++++ b/hub/route/server.go
+@@ -570,5 +570,5 @@
+ }
+ 
+ func version(w http.ResponseWriter, r *http.Request) {
+-	render.JSON(w, r, render.M{"meta": C.Meta, "version": C.Version})
+-}
++	render.JSON(w, r, render.M{"meta": C.Meta, "version": C.Version, "applicationProcessRouting": 1})
++}
 --- /dev/null
 +++ b/rules/common/application_process.go
-@@ -0,0 +1,111 @@
+@@ -0,0 +1,142 @@
 +package common
 +
 +import (
@@ -328,19 +347,23 @@
 +)
 +
 +type ApplicationPolicy struct {
-+	Path    string `json:"path"`
-+	Kind    string `json:"kind"`
-+	Enabled bool   `json:"enabled"`
-+	Mode    string `json:"mode"`
-+	Proxy   string `json:"proxy"`
++	Path           string `json:"path"`
++	Kind           string `json:"kind"`
++	Enabled        bool   `json:"enabled"`
++	Mode           string `json:"mode"`
++	Rules          string `json:"rules"`
++	ProfileMissing bool   `json:"profile_missing"`
++	Proxy          string `json:"proxy"`
 +}
 +
 +type ProcessOverride struct {
-+	PID       uint32 `json:"pid"`
-+	StartTime uint64 `json:"start_time"`
-+	Enabled   bool   `json:"enabled"`
-+	Mode      string `json:"mode"`
-+	Proxy     string `json:"proxy"`
++	PID            uint32 `json:"pid"`
++	StartTime      uint64 `json:"start_time"`
++	Enabled        bool   `json:"enabled"`
++	Mode           string `json:"mode"`
++	Rules          string `json:"rules"`
++	ProfileMissing bool   `json:"profile_missing"`
++	Proxy          string `json:"proxy"`
 +}
 +
 +type ApplicationProcess struct {
@@ -349,14 +372,24 @@
 +	adapter      string
 +	Applications []ApplicationPolicy `json:"applications"`
 +	Overrides    []ProcessOverride   `json:"overrides"`
++	Fallback     string              `json:"fallback"`
++	GlobalMode   string              `json:"global_mode"`
++	TunOnly      bool                `json:"tun_only"`
 +}
 +
 +func (r *ApplicationProcess) Payload() string      { return r.payload }
 +func (r *ApplicationProcess) Adapter() string      { return r.adapter }
 +func (r *ApplicationProcess) RuleType() C.RuleType { return C.ApplicationProcess }
 +
-+func (r *ApplicationProcess) route(metadata *C.Metadata, enabled bool, mode, proxy string) (bool, string) {
++func (r *ApplicationProcess) route(metadata *C.Metadata, enabled bool, mode, proxy, rules string, missing bool) (bool, string) {
++	if !enabled {
++		return r.fallback()
++	}
++	if missing {
++		return true, "REJECT"
++	}
 +	if enabled && mode == "rule" {
++		metadata.ApplicationRuleSet = rules
 +		metadata.ApplicationRuleProxy = proxy
 +		return false, ""
 +	}
@@ -364,6 +397,19 @@
 +		return true, "REJECT"
 +	}
 +	return true, outbound(enabled, proxy)
++}
++
++func (r *ApplicationProcess) fallback() (bool, string) {
++	if r.Fallback == "global" {
++		if r.GlobalMode == "global" {
++			return true, "GLOBAL"
++		}
++		if r.GlobalMode == "direct" {
++			return true, "DIRECT"
++		}
++		return false, ""
++	}
++	return true, "DIRECT"
 +}
 +
 +func outbound(enabled bool, proxy string) string {
@@ -378,6 +424,10 @@
 +
 +func (r *ApplicationProcess) Match(metadata *C.Metadata, helper C.RuleMatchHelper) (bool, string) {
 +	metadata.ApplicationRuleProxy = ""
++	metadata.ApplicationRuleSet = ""
++	if r.TunOnly && metadata.Type != C.TUN {
++		return r.fallback()
++	}
 +	if helper.FindProcess != nil {
 +		helper.FindProcess()
 +	}
@@ -386,13 +436,13 @@
 +	for _, identity := range identities {
 +		for _, override := range r.Overrides {
 +			if identity.PID != 0 && identity.StartTime != 0 && override.PID == identity.PID && override.StartTime == identity.StartTime {
-+				return r.route(metadata, override.Enabled, override.Mode, override.Proxy)
++				return r.route(metadata, override.Enabled, override.Mode, override.Proxy, override.Rules, override.ProfileMissing)
 +			}
 +		}
 +		for i := range r.Applications {
 +			application := &r.Applications[i]
 +			if application.Kind == "executable" && identity.Path == application.Path {
-+				return r.route(metadata, application.Enabled, application.Mode, application.Proxy)
++				return r.route(metadata, application.Enabled, application.Mode, application.Proxy, application.Rules, application.ProfileMissing)
 +			}
 +			if bundle == nil && application.Kind == "bundle" && strings.HasPrefix(identity.Path, application.Path+"/") {
 +				bundle = application
@@ -400,9 +450,9 @@
 +		}
 +	}
 +	if bundle != nil {
-+		return r.route(metadata, bundle.Enabled, bundle.Mode, bundle.Proxy)
++		return r.route(metadata, bundle.Enabled, bundle.Mode, bundle.Proxy, bundle.Rules, bundle.ProfileMissing)
 +	}
-+	return true, "DIRECT"
++	return r.fallback()
 +}
 +
 +func NewApplicationProcess(payload, adapter string) (*ApplicationProcess, error) {
@@ -429,7 +479,7 @@
 +}
 --- /dev/null
 +++ b/rules/common/application_process_test.go
-@@ -0,0 +1,89 @@
+@@ -0,0 +1,123 @@
 +package common
 +
 +import (
@@ -519,13 +569,172 @@
 +		t.Fatal("bundled helper must follow its parent's temporary override")
 +	}
 +}
---- a/hub/route/server.go
-+++ b/hub/route/server.go
-@@ -570,5 +570,5 @@
- }
- 
- func version(w http.ResponseWriter, r *http.Request) {
--	render.JSON(w, r, render.M{"meta": C.Meta, "version": C.Version})
--}
-+	render.JSON(w, r, render.M{"meta": C.Meta, "version": C.Version, "applicationProcessRouting": 1})
++
++func TestApplicationSubscriptionRoutingAndGlobalFallback(t *testing.T) {
++	policy := ApplicationProcess{Fallback: "global", GlobalMode: "rule", TunOnly: true, Applications: []ApplicationPolicy{{Path: "/Applications/Browser.app", Kind: "bundle", Enabled: true, Mode: "rule", Rules: "subscription-B", Proxy: "B-Exit"}}}
++	data, _ := json.Marshal(policy)
++	rule, err := NewApplicationProcess(base64.RawURLEncoding.EncodeToString(data), "DIRECT")
++	if err != nil {
++		t.Fatal(err)
++	}
++	metadata := &C.Metadata{Type: C.HTTP, ProcessPath: "/Applications/Browser.app/Contents/MacOS/Browser"}
++	if matched, _ := rule.Match(metadata, C.RuleMatchHelper{}); matched || metadata.ApplicationRuleSet != "" {
++		t.Fatal("system proxy must use global defaults")
++	}
++	metadata.Type = C.TUN
++	if matched, _ := rule.Match(metadata, C.RuleMatchHelper{}); matched || metadata.ApplicationRuleSet != "subscription-B" || metadata.ApplicationRuleProxy != "B-Exit" {
++		t.Fatal("TUN app must select its own subscription rules and node")
++	}
++	metadata.ProcessPath = "/unconfigured/process"
++	if matched, _ := rule.Match(metadata, C.RuleMatchHelper{}); matched {
++		t.Fatal("unconfigured TUN traffic must use global rules")
++	}
++	rule.GlobalMode = "global"
++	if matched, target := rule.Match(metadata, C.RuleMatchHelper{}); !matched || target != "GLOBAL" {
++		t.Fatal("unconfigured traffic must honor global proxy mode")
++	}
++	rule.GlobalMode = "direct"
++	if matched, target := rule.Match(metadata, C.RuleMatchHelper{}); !matched || target != "DIRECT" {
++		t.Fatal("unconfigured traffic must honor global direct mode")
++	}
++	metadata.ProcessPath = "/Applications/Browser.app/Contents/MacOS/Browser"
++	rule.Applications[0].ProfileMissing = true
++	if matched, target := rule.Match(metadata, C.RuleMatchHelper{}); !matched || target != "REJECT" {
++		t.Fatal("removed subscription must not silently use another subscription")
++	}
 +}
+--- a/rules/parser.go
++++ b/rules/parser.go
+@@ -15,6 +15,8 @@
+ 	}
+ 
+ 	switch tp {
++	case "APPLICATION-PROCESS":
++		parsed, parseErr = RC.NewApplicationProcess(payload, target)
+ 	case "DOMAIN":
+ 		parsed = RC.NewDomain(payload, target)
+ 	case "DOMAIN-SUFFIX":
+--- a/tunnel/tunnel.go
++++ b/tunnel/tunnel.go
+@@ -353,13 +353,16 @@
+ 				attemptProcessLookup = false
+ 				if !features.CMFA {
+ 					// normal check for process
+-					uid, path, err := process.FindProcessName(metadata.NetWork.String(), metadata.SrcIP, int(metadata.SrcPort))
++					info, err := process.FindProcessInfo(metadata.NetWork.String(), metadata.SrcIP, int(metadata.SrcPort))
+ 					if err != nil {
+ 						log.Debugln("[Process] find process error for %s: %v", metadata.String(), err)
+ 					} else {
+-						metadata.Process = filepath.Base(path)
+-						metadata.ProcessPath = path
+-						metadata.Uid = uid
++						metadata.Process = filepath.Base(info.Path)
++						metadata.ProcessPath = info.Path
++						metadata.Uid = info.UID
++						metadata.ProcessID = info.PID
++						metadata.ProcessStartTime = info.StartTime
++						metadata.ProcessAncestors = info.Ancestors
+ 
+ 						if pkg, err := process.FindPackageName(metadata); err == nil { // for android (not CMFA) package names
+ 							metadata.Process = pkg
+@@ -659,35 +662,75 @@
+ 	for {
+ 		var rematchProxy C.Proxy
+ 		var rematchRule C.Rule
+-	GetRules:
+-		for _, rule := range getRules(metadata) {
+-			if matched, ada := rule.Match(metadata, helper); matched {
+-				adapter, ok := proxies[ada]
+-				if !ok {
+-					continue
++		matchingRules := getRules(metadata)
++	RuleLists:
++		for {
++			redirected := false
++		GetRules:
++			for _, rule := range matchingRules {
++				matched, ada := rule.Match(metadata, helper)
++				if rule.RuleType() == C.ApplicationProcess && metadata.ApplicationRuleSet != "" {
++					selected, exists := subRules[metadata.ApplicationRuleSet]
++					if !exists {
++						return proxies["REJECT"], rule, nil
++					}
++					matchingRules = selected
++					redirected = true
++					break GetRules
+ 				}
+-
+-				// parse multi-layer nesting
+-				for adapter := adapter; adapter != nil; adapter = adapter.Unwrap(metadata, false) {
+-					if adapter.Type() == C.Pass {
+-						log.Debugln("%s match Pass rule", adapter.Name())
+-						continue GetRules
++				if matched {
++					adapter, ok := proxies[ada]
++					if !ok {
++						continue
+ 					}
+-					if adapter.Type() == C.Rematch {
+-						log.Debugln("%s match Rematch rule", adapter.Name())
+-						rematchProxy = adapter
+-						rematchRule = rule
+-						break GetRules
++
++					// parse multi-layer nesting
++					for adapter := adapter; adapter != nil; adapter = adapter.Unwrap(metadata, false) {
++						if adapter.Type() == C.Pass {
++							log.Debugln("%s match Pass rule", adapter.Name())
++							continue GetRules
++						}
++						if adapter.Type() == C.Rematch {
++							log.Debugln("%s match Rematch rule", adapter.Name())
++							rematchProxy = adapter
++							rematchRule = rule
++							break GetRules
++						}
+ 					}
++
++					applicationOverride := false
++					if metadata.ApplicationRuleProxy != "" {
++						preserve := false
++						for leaf := adapter; leaf != nil; leaf = leaf.Unwrap(metadata, false) {
++							if leaf.Type() == C.Direct || leaf.Type() == C.Reject || leaf.Type() == C.RejectDrop {
++								preserve = true
++								break
++							}
++						}
++						if !preserve {
++							selected, exists := proxies[metadata.ApplicationRuleProxy]
++							if !exists {
++								selected = proxies["REJECT"]
++							}
++							adapter = selected
++							applicationOverride = true
++						}
++					}
++					if metadata.NetWork == C.UDP && !adapter.SupportUDP() {
++						if applicationOverride {
++							return proxies["REJECT"], rule, nil
++						}
++						log.Debugln("%s UDP is not supported", adapter.Name())
++						continue
++					}
++
++					return adapter, rule, nil
+ 				}
+-
+-				if metadata.NetWork == C.UDP && !adapter.SupportUDP() {
+-					log.Debugln("%s UDP is not supported", adapter.Name())
+-					continue
+-				}
+-
+-				return adapter, rule, nil
+-			}
++			}
++			if redirected {
++				continue RuleLists
++			}
++			break RuleLists
+ 		}
+ 		if rematchProxy != nil {
+ 			if slices.Contains(rematchChain, rematchProxy.Name()) {

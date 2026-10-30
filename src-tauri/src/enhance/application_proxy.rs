@@ -1,3 +1,4 @@
+use super::application_profiles;
 use crate::config::application_proxy::ApplicationProxyConfig;
 use anyhow::Result;
 use serde_yaml_ng::{Mapping, Value};
@@ -8,6 +9,8 @@ pub fn use_application_proxy(mut config: Mapping, settings: Option<&ApplicationP
         return Ok(config);
     };
     settings.validate()?;
+    let global_mode = config.get("mode").and_then(Value::as_str).unwrap_or("rule").to_owned();
+    let sub_rules = config.get("sub-rules").and_then(Value::as_mapping);
     let outbounds: HashSet<&str> = ["proxies", "proxy-groups"]
         .into_iter()
         .filter_map(|key| config.get(key).and_then(Value::as_sequence))
@@ -17,14 +20,14 @@ pub fn use_application_proxy(mut config: Mapping, settings: Option<&ApplicationP
     use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
     let applications: Vec<_> = settings.applications.iter().map(|application| {
         let proxy = application.proxy.as_deref().map(|proxy| if outbounds.contains(proxy) { proxy } else { "REJECT" }).unwrap_or(if application.routing_mode == crate::config::application_proxy::ApplicationRoutingMode::Rule { "" } else { "REJECT" });
-        serde_json::json!({"path": application.path, "kind": application.kind, "enabled": application.enabled, "mode": application.routing_mode, "proxy": proxy})
+        serde_json::json!({"path": application.path, "kind": application.kind, "enabled": application.enabled, "mode": application.routing_mode, "proxy": proxy, "rules": application.profile_uid.as_ref().map(|uid| application_profiles::root_rules(uid)), "profile_missing": application.profile_uid.as_ref().is_some_and(|uid| !sub_rules.is_some_and(|rules| rules.contains_key(Value::from(application_profiles::root_rules(uid)))))})
     }).collect();
     let overrides: Vec<_> = crate::core::application_processes::overrides().into_iter().map(|setting| {
         let proxy = setting.proxy.as_deref().map(|proxy| if outbounds.contains(proxy) { proxy } else { "REJECT" }).unwrap_or(if setting.routing_mode == crate::config::application_proxy::ApplicationRoutingMode::Rule { "" } else { "REJECT" });
-        serde_json::json!({"pid": setting.pid, "start_time": setting.start_time, "enabled": setting.enabled, "mode": setting.routing_mode, "proxy": proxy})
+        serde_json::json!({"pid": setting.pid, "start_time": setting.start_time, "enabled": setting.enabled, "mode": setting.routing_mode, "proxy": proxy, "rules": setting.profile_uid.as_ref().map(|uid| application_profiles::root_rules(uid)), "profile_missing": setting.profile_uid.as_ref().is_some_and(|uid| !sub_rules.is_some_and(|rules| rules.contains_key(Value::from(application_profiles::root_rules(uid)))))})
     }).collect();
     let payload = URL_SAFE_NO_PAD.encode(serde_json::to_vec(
-        &serde_json::json!({"applications": applications, "overrides": overrides}),
+        &serde_json::json!({"applications": applications, "overrides": overrides, "fallback": "global", "global_mode": global_mode, "tun_only": true}),
     )?);
     let mut rules = vec![
         Value::from(format!("APPLICATION-PROCESS,{payload},DIRECT")),
@@ -65,6 +68,7 @@ mod tests {
                 enabled: true,
                 routing_mode: crate::config::application_proxy::ApplicationRoutingMode::Rule,
                 proxy: None,
+                profile_uid: None,
             }],
         };
         assert_eq!(use_application_proxy(config.clone(), None)?, config);
@@ -107,6 +111,7 @@ mod tests {
                     enabled: false,
                     routing_mode: crate::config::application_proxy::ApplicationRoutingMode::Rule,
                     proxy: None,
+                    profile_uid: None,
                 },
                 ApplicationProxyEntry {
                     name: "Helper".into(),
@@ -115,6 +120,7 @@ mod tests {
                     enabled: false,
                     routing_mode: crate::config::application_proxy::ApplicationRoutingMode::Rule,
                     proxy: None,
+                    profile_uid: None,
                 },
             ],
         };

@@ -2,7 +2,6 @@ import { useDraggable } from '@dnd-kit/react'
 import AppsRounded from '@mui/icons-material/AppsRounded'
 import ChevronRightRounded from '@mui/icons-material/ChevronRightRounded'
 import DragIndicatorRounded from '@mui/icons-material/DragIndicatorRounded'
-import ExpandMoreRounded from '@mui/icons-material/ExpandMoreRounded'
 import MoreHorizRounded from '@mui/icons-material/MoreHorizRounded'
 import {
   Autocomplete,
@@ -19,11 +18,12 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material'
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { getProxyApplicationIcon } from '@/services/application-proxy'
 import {
+  applicationOutboundLabel,
   getApplicationProxyHistory,
   type ApplicationRowModel,
 } from '@/services/application-proxy-model'
@@ -39,15 +39,16 @@ interface Props {
   proxyView?: ProxyViewV1
   pending: boolean
   applicationMode: boolean
+  subscriptions: { uid: string; name: string }[]
+  onSubscription: (uid: string | null) => void
   onRoutingMode: (mode: IApplicationRoutingMode) => void
   onProxy: (proxy: string | null) => void
   onToggle: (enabled: boolean) => void
   onDisconnect: () => void
+  onViewConnections: () => void
   onReset: () => void
   onExpand?: () => void
-  expanded?: boolean
   processCount?: number
-  children?: ReactNode
 }
 
 export function ApplicationRow({
@@ -58,26 +59,17 @@ export function ApplicationRow({
   applicationMode,
   onProxy,
   onRoutingMode,
+  subscriptions,
+  onSubscription,
   onToggle,
   onDisconnect,
+  onViewConnections,
   onReset,
   onExpand,
-  expanded,
   processCount,
-  children,
 }: Props) {
   const { t } = useTranslation()
   const [menu, setMenu] = useState<HTMLElement | null>(null)
-  const processListRef = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    if (!expanded) return
-    const frame = requestAnimationFrame(() => {
-      processListRef.current?.firstElementChild?.scrollIntoView({
-        block: 'nearest',
-      })
-    })
-    return () => cancelAnimationFrame(frame)
-  }, [expanded])
   const { application } = row
   const { ref, handleRef, isDragging } = useDraggable({
     id: row.process
@@ -110,7 +102,7 @@ export function ApplicationRow({
   const routes = [
     ...new Set(
       row.connections.map((connection) =>
-        [...connection.chains].reverse().join(' / '),
+        connection.chains.map(applicationOutboundLabel).reverse().join(' / '),
       ),
     ),
   ].filter(Boolean)
@@ -145,8 +137,8 @@ export function ApplicationRow({
           slotProps={{ img: { draggable: false } }}
           variant="rounded"
           sx={{
-            width: row.process ? 24 : 36,
-            height: row.process ? 24 : 36,
+            width: row.process ? 22 : 36,
+            height: row.process ? 22 : 36,
             bgcolor: 'transparent',
             flexShrink: 0,
           }}
@@ -172,7 +164,11 @@ export function ApplicationRow({
               noWrap
               variant="caption"
               color="text.secondary"
-              sx={{ display: 'block' }}
+              sx={{
+                display: 'block',
+                fontSize: row.process ? 10 : undefined,
+                lineHeight: row.process ? 1.3 : undefined,
+              }}
             >
               {row.process
                 ? `PID ${row.process.pid} · ${t(row.configured ? 'rules.applicationProxy.temporary' : 'rules.applicationProxy.inherited', { name: row.inheritedFrom })}`
@@ -218,6 +214,14 @@ export function ApplicationRow({
       </IconButton>
       <Menu anchorEl={menu} open={!!menu} onClose={() => setMenu(null)}>
         <MenuItem
+          onClick={() => {
+            setMenu(null)
+            onViewConnections()
+          }}
+        >
+          {t('rules.applicationProxy.viewConnections')}
+        </MenuItem>
+        <MenuItem
           disabled={!row.connections.length}
           onClick={() => {
             setMenu(null)
@@ -258,7 +262,10 @@ export function ApplicationRow({
         select
         size="small"
         sx={{
-          '& .MuiInputBase-root': { height: 32, fontSize: 12.5 },
+          '& .MuiInputBase-root': {
+            height: row.process ? 28 : 32,
+            fontSize: row.process ? 11.5 : 12.5,
+          },
           '& .MuiSelect-select': { py: 0.5, pl: 1, pr: '24px !important' },
           '& .MuiSelect-icon': { fontSize: 18, right: 4 },
         }}
@@ -282,9 +289,9 @@ export function ApplicationRow({
         sx={{
           minWidth: 0,
           '& .MuiOutlinedInput-root': {
-            minHeight: 32,
-            fontSize: 12.5,
-            padding: '4px 8px !important',
+            minHeight: row.process ? 28 : 32,
+            fontSize: row.process ? 11.5 : 12.5,
+            padding: row.process ? '3px 8px !important' : '4px 8px !important',
             paddingRight:
               row.proxy && !(row.enabled && row.routingMode === 'proxy')
                 ? '58px !important'
@@ -302,6 +309,7 @@ export function ApplicationRow({
         size="small"
         options={options}
         value={row.proxy}
+        getOptionLabel={applicationOutboundLabel}
         disabled={pending}
         disableClearable={row.enabled && row.routingMode === 'proxy'}
         onChange={(_, value) => onProxy(value)}
@@ -341,10 +349,19 @@ export function ApplicationRow({
     >
       <Tooltip title={t('rules.applicationProxy.speedHelp')}>
         <Stack direction="row" spacing={1}>
-          <Typography variant="caption" sx={{ color: 'warning.main' }}>
+          <Typography
+            variant="caption"
+            sx={{
+              color: 'warning.main',
+              fontSize: row.process ? 10 : undefined,
+            }}
+          >
             ↑ {speed(row.uploadSpeed)}
           </Typography>
-          <Typography variant="caption" sx={{ color: 'info.main' }}>
+          <Typography
+            variant="caption"
+            sx={{ color: 'info.main', fontSize: row.process ? 10 : undefined }}
+          >
             ↓ {speed(row.downloadSpeed)}
           </Typography>
         </Stack>
@@ -352,10 +369,11 @@ export function ApplicationRow({
       <Chip
         size="small"
         variant="outlined"
+        onClick={onViewConnections}
         label={t('rules.applicationProxy.connections', {
           count: row.connections.length,
         })}
-        sx={{ height: 22, fontSize: 11 }}
+        sx={{ height: row.process ? 18 : 22, fontSize: row.process ? 10 : 11 }}
       />
       <Tooltip
         title={
@@ -367,6 +385,7 @@ export function ApplicationRow({
         <Typography
           variant="caption"
           sx={{
+            fontSize: row.process ? 10 : undefined,
             color:
               missing || history?.delay === 0 ? 'error.main' : 'text.secondary',
           }}
@@ -388,12 +407,12 @@ export function ApplicationRow({
         noWrap
         variant="caption"
         color="text.secondary"
-        sx={{ display: 'block', mt: 0.25, fontSize: 11 }}
+        sx={{ display: 'block', mt: 0.25, fontSize: row.process ? 10 : 11 }}
       >
         {routes.length
           ? routes.join('; ')
           : group?.now
-            ? `${t('rules.applicationProxy.selectedNode')} ${group.now}`
+            ? `${t('rules.applicationProxy.selectedNode')} ${applicationOutboundLabel(group.now)}`
             : t('rules.applicationProxy.noConnections')}
       </Typography>
     </Tooltip>
@@ -404,10 +423,10 @@ export function ApplicationRow({
       ref={ref}
       sx={{
         opacity: isDragging ? 0.4 : 1,
-        border: row.process ? 0 : '1px solid',
+        border: '1px solid',
         borderColor: 'divider',
-        borderRadius: row.process ? 0 : 2.5,
-        bgcolor: row.process ? 'transparent' : 'background.paper',
+        borderRadius: row.process ? 1.5 : 2.5,
+        bgcolor: 'background.paper',
         overflow: 'hidden',
         boxShadow: row.process ? undefined : '0 2px 8px rgba(0,0,0,0.03)',
         transition: 'border-color 150ms',
@@ -424,27 +443,57 @@ export function ApplicationRow({
             borderColor: 'divider',
             borderBottom: '1px solid',
             display: 'grid',
-            gridTemplateColumns: {
-              xs: 'minmax(0,1fr) auto',
-              md: 'minmax(150px,0.8fr) minmax(230px,1.3fr) auto',
-            },
+            gridTemplateColumns: 'minmax(0, 1fr) auto',
             alignItems: 'center',
-            gap: 1,
+            gap: 0.5,
           }}
         >
           <Box sx={{ minWidth: 0 }}>{identity}</Box>
           <Box
             sx={{
-              gridColumn: { xs: '1 / -1', md: 'auto' },
-              gridRow: { xs: 2, md: 'auto' },
+              gridColumn: '1 / -1',
+              gridRow: 2,
             }}
           >
+            <TextField
+              select
+              size="small"
+              fullWidth
+              value={row.profileUid ?? ''}
+              disabled={pending}
+              onChange={(event) => onSubscription(event.target.value || null)}
+              sx={{
+                mb: 0.5,
+                '& .MuiInputBase-root': { height: 32, fontSize: 12.5 },
+              }}
+              slotProps={{
+                htmlInput: {
+                  'aria-label': `${application.name} ${t('rules.applicationProxy.subscription')}`,
+                },
+                select: { displayEmpty: true },
+              }}
+            >
+              <MenuItem value="">
+                {t('rules.applicationProxy.globalSubscription')}
+              </MenuItem>
+              {row.profileUid &&
+                !subscriptions.some((item) => item.uid === row.profileUid) && (
+                  <MenuItem value={row.profileUid}>
+                    {t('rules.applicationProxy.missingSubscription')}
+                  </MenuItem>
+                )}
+              {subscriptions.map((item) => (
+                <MenuItem key={item.uid} value={item.uid}>
+                  {item.name}
+                </MenuItem>
+              ))}
+            </TextField>
             {controls}
           </Box>
           {actions}
           <Box sx={{ gridColumn: '1 / -1', minWidth: 0 }}>
             {metrics}
-            {route}
+            {routes.length > 0 && route}
           </Box>
         </Box>
       ) : (
@@ -452,25 +501,20 @@ export function ApplicationRow({
           sx={{
             p: 1,
             display: 'grid',
-            gridTemplateColumns: {
-              xs: 'minmax(0, 1fr) auto',
-              md: 'minmax(150px, 0.8fr) minmax(260px, 1.6fr) auto',
-            },
+            gridTemplateColumns: 'minmax(0, 1fr) auto',
             alignItems: 'center',
             columnGap: 1.25,
             rowGap: 0.5,
           }}
         >
-          <Box sx={{ minWidth: 0, gridRow: { md: '1 / span 2' } }}>
+          <Box sx={{ minWidth: 0, gridRow: 1 }}>
             {identity}
             {!!processCount && onExpand && (
               <Button
                 size="small"
                 onClick={onExpand}
-                aria-expanded={!!expanded}
-                startIcon={
-                  expanded ? <ExpandMoreRounded /> : <ChevronRightRounded />
-                }
+                aria-haspopup="dialog"
+                startIcon={<ChevronRightRounded />}
                 sx={{
                   py: 0,
                   mt: 0.2,
@@ -489,46 +533,56 @@ export function ApplicationRow({
           <Box
             sx={{
               minWidth: 0,
-              gridColumn: { xs: '1 / -1', md: 2 },
-              gridRow: { xs: 2, md: 1 },
+              gridColumn: '1 / -1',
+              gridRow: 2,
             }}
           >
+            <TextField
+              select
+              size="small"
+              fullWidth
+              value={row.profileUid ?? ''}
+              disabled={pending}
+              onChange={(event) => onSubscription(event.target.value || null)}
+              sx={{
+                mb: 0.5,
+                '& .MuiInputBase-root': { height: 32, fontSize: 12.5 },
+              }}
+              slotProps={{
+                htmlInput: {
+                  'aria-label': `${application.name} ${t('rules.applicationProxy.subscription')}`,
+                },
+                select: { displayEmpty: true },
+              }}
+            >
+              <MenuItem value="">
+                {t('rules.applicationProxy.globalSubscription')}
+              </MenuItem>
+              {row.profileUid &&
+                !subscriptions.some((item) => item.uid === row.profileUid) && (
+                  <MenuItem value={row.profileUid}>
+                    {t('rules.applicationProxy.missingSubscription')}
+                  </MenuItem>
+                )}
+              {subscriptions.map((item) => (
+                <MenuItem key={item.uid} value={item.uid}>
+                  {item.name}
+                </MenuItem>
+              ))}
+            </TextField>
             {controls}
           </Box>
           <Box
             sx={{
-              gridColumn: { xs: 2, md: 3 },
-              gridRow: { xs: 1, md: '1 / span 2' },
+              gridColumn: 2,
+              gridRow: 1,
             }}
           >
             {actions}
           </Box>
-          <Box sx={{ minWidth: 0, gridColumn: { xs: '1 / -1', md: 2 } }}>
+          <Box sx={{ minWidth: 0, gridColumn: '1 / -1' }}>
             {metrics}
             {route}
-          </Box>
-        </Box>
-      )}
-      {children && (
-        <Box
-          sx={{
-            borderTop: '1px solid',
-            borderColor: 'divider',
-            bgcolor: 'action.hover',
-          }}
-        >
-          <Typography
-            variant="caption"
-            sx={{ display: 'block', px: 2, py: 0.8, color: 'text.secondary' }}
-          >
-            {application.name} ·{' '}
-            {t('rules.applicationProxy.processCount', { count: processCount })}
-          </Typography>
-          <Box
-            ref={processListRef}
-            sx={{ maxHeight: 280, overflowY: 'auto', px: 1, pb: 1 }}
-          >
-            {children}
           </Box>
         </Box>
       )}

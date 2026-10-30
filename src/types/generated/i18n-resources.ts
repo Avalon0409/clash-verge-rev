@@ -34,7 +34,12 @@ export interface TranslationResources {
         }
       }
       page: {
+        closeFiltered: string
+        includingChildren: string
+        processInstanceOnly: string
         title: string
+        visibleDownloaded: string
+        visibleUploaded: string
       }
     }
     home: {
@@ -631,6 +636,7 @@ export interface TranslationResources {
         cancel: string
         chooseOutbound: string
         confirmEnable: string
+        connectedProcesses: string
         connectionHelp: string
         connections: string
         description: string
@@ -649,13 +655,17 @@ export interface TranslationResources {
         filteredEmpty: string
         followParent: string
         followSubscription: string
+        globalSubscription: string
         inactive: string
         inherited: string
         lastTest: string
         listFailed: string
         missing: string
         missingHelp: string
+        missingSubscription: string
         noConnections: string
+        noMatchingProcesses: string
+        noProcesses: string
         notConfigured: string
         originalMode: string
         outbound: string
@@ -666,6 +676,9 @@ export interface TranslationResources {
         pausedHelp: string
         process: string
         processCount: string
+        processDialogClose: string
+        processDialogHint: string
+        processSearch: string
         proxy: string
         proxyMode: string
         refresh: string
@@ -673,6 +686,9 @@ export interface TranslationResources {
         reset: string
         routingMode: string
         ruleMode: string
+        runningEmpty: string
+        runningOnly: string
+        runningOnlyHelp: string
         sampling: string
         saved: string
         search: string
@@ -684,11 +700,16 @@ export interface TranslationResources {
         speedColumn: string
         speedHelp: string
         statusColumn: string
+        subscription: string
+        subscriptionReadFailed: string
+        subscriptionRulesHint: string
         switchColumn: string
         temporary: string
+        temporaryOverrides: string
         testFailed: string
         title: string
         untested: string
+        viewConnections: string
       }
       feedback: {
         notifications: {

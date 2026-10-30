@@ -186,6 +186,7 @@ mod app_init {
             cmd::get_clash_logs,
             cmd::get_verge_config,
             cmd::list_proxy_applications,
+            cmd::list_application_profile_outbounds,
             cmd::get_application_processes,
             cmd::update_application_process,
             cmd::reset_application_process,

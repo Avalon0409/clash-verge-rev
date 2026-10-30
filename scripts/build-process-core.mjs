@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { readFileSync, mkdtempSync, rmSync } from 'node:fs'
+import { readFileSync, mkdtempSync, rmSync, copyFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -44,7 +44,7 @@ try {
     { cwd: work },
   )
   const env = { ...process.env, CGO_ENABLED: '0' }
-  execFileSync('go', ['test', './rules/common', './component/process'], {
+  execFileSync('go', ['test', './rules/common', './component/process', './adapter/outboundgroup', './adapter/provider'], {
     cwd: work,
     env,
     stdio: 'inherit',
@@ -57,11 +57,15 @@ try {
       'with_gvisor',
       '-trimpath',
       '-ldflags',
-      `-X github.com/metacubex/mihomo/constant.Version=${source.version}-app-process`,
+      `-s -w -X github.com/metacubex/mihomo/constant.Version=${source.version}-app-cross-subscription-1`,
       '-o',
       resolve(root, `src-tauri/sidecar/verge-mihomo-${host}`),
     ],
     { cwd: work, env, stdio: 'inherit' },
+  )
+  copyFileSync(
+    resolve(root, `src-tauri/sidecar/verge-mihomo-${host}`),
+    resolve(root, `src-tauri/sidecar/verge-mihomo-alpha-${host}`),
   )
 } finally {
   rmSync(work, { recursive: true, force: true })

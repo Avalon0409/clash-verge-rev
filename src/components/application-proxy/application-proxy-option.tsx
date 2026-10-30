@@ -1,7 +1,10 @@
 import { Box, Typography } from '@mui/material'
 import { useTranslation } from 'react-i18next'
 
-import { getApplicationProxyHistory } from '@/services/application-proxy-model'
+import {
+  applicationOutboundLabel,
+  getApplicationProxyHistory,
+} from '@/services/application-proxy-model'
 import type { ProxyViewV1 } from '@/types/proxy-view'
 
 interface Props {
@@ -39,7 +42,7 @@ export function ApplicationProxyOption({
         variant="body2"
         sx={{ flex: 1, overflowWrap: 'anywhere', fontSize: 12.5 }}
       >
-        {name}
+        {applicationOutboundLabel(name)}
       </Typography>
       <Typography
         variant="caption"

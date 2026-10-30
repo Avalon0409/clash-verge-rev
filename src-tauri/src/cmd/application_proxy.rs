@@ -13,6 +13,21 @@ pub async fn update_application_proxy(mut change: ApplicationProxyChange) -> Cmd
             .await
             .with_error_code("APPLICATION_PATH_INVALID")?;
     }
+    let uid = match &change {
+        ApplicationProxyChange::Configure { profile_uid, .. }
+        | ApplicationProxyChange::SetProfile { profile_uid, .. } => profile_uid.as_deref(),
+        _ => None,
+    };
+    if let Some(uid) = uid {
+        let profiles = crate::config::Config::profiles().await.data_arc();
+        let item = profiles
+            .get_item(uid)
+            .with_error_code("APPLICATION_SUBSCRIPTION_INVALID")?;
+        matches!(item.itype.as_deref(), Some("remote" | "local"))
+            .then_some(())
+            .ok_or_else(|| anyhow::anyhow!("select a subscription profile"))
+            .with_error_code("APPLICATION_SUBSCRIPTION_INVALID")?;
+    }
     crate::feat::update_application_proxy(change)
         .await
         .with_error_code("APPLICATION_PROXY_UPDATE_FAILED")
@@ -180,4 +195,13 @@ pub async fn reset_application_process(pid: u32, start_time: u64) -> CmdResult<(
     crate::core::application_processes::reset(pid, start_time)
         .await
         .with_error_code("APPLICATION_PROCESS_UPDATE_FAILED")
+}
+
+#[tauri::command]
+pub async fn list_application_profile_outbounds(
+    uid: String,
+) -> CmdResult<Vec<crate::enhance::application_profiles::OutboundOption>> {
+    crate::enhance::application_profiles::catalog(&uid)
+        .await
+        .with_error_code("APPLICATION_SUBSCRIPTION_READ_FAILED")
 }

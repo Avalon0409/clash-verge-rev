@@ -257,7 +257,23 @@ pub async fn delete_profile(index: String) -> CmdResult {
     let result = profiles
         .with_data_modify(|mut candidate| async move {
             let original = candidate.clone();
-            let (should_update, plan) = candidate.plan_delete_item(&index)?;
+            let (is_current, plan) = candidate.plan_delete_item(&index)?;
+            let referenced = Config::verge()
+                .await
+                .data_arc()
+                .application_proxy
+                .as_ref()
+                .is_some_and(|settings| {
+                    settings.enabled
+                        && settings
+                            .applications
+                            .iter()
+                            .any(|entry| entry.profile_uid.as_deref() == Some(index.as_str()))
+                })
+                || crate::core::application_processes::overrides()
+                    .iter()
+                    .any(|entry| entry.profile_uid.as_deref() == Some(index.as_str()));
+            let should_update = is_current || referenced;
             let guard = if should_update {
                 match CoreManager::global()
                     .update_config_forced_with_profiles(&candidate, &original)

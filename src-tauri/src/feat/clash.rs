@@ -2,7 +2,7 @@ use crate::core::notify::NoticeStatus;
 use crate::core::notify::{Refresh, announce};
 use crate::{
     config::{Config, MixedPort},
-    core::{CoreManager, handle, tray},
+    core::{CoreManager, handle},
     feat::clean_async,
     process::AsyncHandler,
     utils,
@@ -92,29 +92,11 @@ fn after_change_clash_mode() {
 
 /// Propagates mihomo PATCH failures so the frontend can roll back its optimistic mode.
 pub async fn change_clash_mode(mode: String) -> Result<(), String> {
-    let _config_write = Config::try_lock_config_write().map_err(|error| String::from(error.to_string()))?;
-    super::config::ensure_application_proxy_mode(mode.as_str())
-        .await
-        .map_err(|error| String::from(error.to_string()))?;
     let mut mapping = Mapping::new();
     mapping.insert(Value::from("mode"), Value::from(mode.as_str()));
-    let json_value = serde_json::json!({
-        "mode": mode
-    });
-    if let Err(err) = handle::Handle::mihomo().patch_base_config(&json_value).await {
-        logging!(error, Type::Core, "change clash mode failed: {err}");
-        return Err(err.to_string().into());
-    }
-
-    let clash = Config::clash().await;
-    clash.edit_draft(|d| d.patch_config(&mapping));
-    clash.apply();
-
-    let clash_data = clash.data_arc();
-    if clash_data.save_config().await.is_ok() {
-        announce(Refresh::Clash);
-        tray::Tray::global().update_menu_and_icon().await;
-    }
+    super::config::patch_clash(&mapping)
+        .await
+        .map_err(|error| String::from(error.to_string()))?;
 
     let is_auto_close_connection = Config::verge().await.data_arc().auto_close_connection.unwrap_or(false);
     if is_auto_close_connection {

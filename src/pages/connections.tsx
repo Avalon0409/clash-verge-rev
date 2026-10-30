@@ -8,15 +8,18 @@ import {
   Box,
   Button,
   ButtonGroup,
+  Chip,
   Fab,
   IconButton,
   MenuItem,
   Tooltip,
+  Typography,
   Zoom,
 } from '@mui/material'
 import { useLockFn } from 'ahooks'
 import { useCallback, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useSearchParams } from 'react-router'
 import { closeAllConnections } from 'tauri-plugin-mihomo-api'
 
 import {
@@ -41,7 +44,17 @@ import { useConnectionData } from '@/hooks/use-connection-data'
 import { useConnectionSetting } from '@/hooks/use-connection-setting'
 import { useTrafficData } from '@/hooks/use-traffic-data'
 import { useVisibility } from '@/hooks/use-visibility'
+import {
+  APPLICATION_CONNECTION_PARAMS,
+  createApplicationConnectionMatcher,
+  readApplicationConnectionFilter,
+} from '@/services/application-connections'
+import {
+  disconnectApplicationConnections,
+  getApplicationProcesses,
+} from '@/services/application-proxy'
 import { mutate } from '@/services/mutate'
+import { useQuery } from '@/services/query-client'
 import parseTraffic from '@/utils/parse-traffic'
 
 type OrderFunc = (list: IConnectionsItem[]) => IConnectionsItem[]
@@ -83,6 +96,37 @@ const EMPTY_CONNECTIONS: IConnectionsItem[] = []
 const ConnectionsPage = () => {
   const { t } = useTranslation()
   const pageVisible = useVisibility()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const applicationFilter = useMemo(
+    () => readApplicationConnectionFilter(searchParams),
+    [searchParams],
+  )
+  const { data: processSnapshot } = useQuery({
+    queryKey: ['getApplicationProcesses'],
+    queryFn: getApplicationProcesses,
+    enabled: pageVisible && applicationFilter?.kind === 'application',
+    refetchInterval: 2000,
+    retry: false,
+  })
+  const appMatcher = useMemo(
+    () =>
+      applicationFilter
+        ? createApplicationConnectionMatcher(
+            applicationFilter,
+            processSnapshot?.processes,
+          )
+        : null,
+    [applicationFilter, processSnapshot?.processes],
+  )
+  const clearApplicationFilter = () =>
+    setSearchParams(
+      (previous) => {
+        const next = new URLSearchParams(previous)
+        for (const key of APPLICATION_CONNECTION_PARAMS) next.delete(key)
+        return next
+      },
+      { replace: true },
+    )
   const [match, setMatch] = useState<(input: string) => boolean>(
     () => () => true,
   )
@@ -106,10 +150,21 @@ const ConnectionsPage = () => {
 
   const [isColumnManagerOpen, setIsColumnManagerOpen] = useState(false)
 
+  const scopedConnections = useMemo(() => {
+    const active = connections?.activeConnections ?? EMPTY_CONNECTIONS
+    const closed = connections?.closedConnections ?? EMPTY_CONNECTIONS
+    return appMatcher
+      ? { active: active.filter(appMatcher), closed: closed.filter(appMatcher) }
+      : { active, closed }
+  }, [
+    connections?.activeConnections,
+    connections?.closedConnections,
+    appMatcher,
+  ])
   const selectedConnections =
     connectionsType === 'active'
-      ? (connections?.activeConnections ?? EMPTY_CONNECTIONS)
-      : (connections?.closedConnections ?? EMPTY_CONNECTIONS)
+      ? scopedConnections.active
+      : scopedConnections.closed
 
   const filterConn = useMemo(() => {
     const orderFunc = orderFunctionMap[curOrderOpt]
@@ -153,12 +208,14 @@ const ConnectionsPage = () => {
     [connectionsType, filterConn],
   )
 
-  const onCloseAll = useLockFn(() =>
-    mutate(() => closeAllConnections(), {
-      id: 'close-all-connections',
-      errorNotice: false,
-    }),
-  )
+  const onCloseAll = useLockFn(async () => {
+    if (applicationFilter) await disconnectApplicationConnections(filterConn)
+    else
+      await mutate(() => closeAllConnections(), {
+        id: 'close-all-connections',
+        errorNotice: false,
+      })
+  })
 
   const handleSearch = useCallback(
     (match: (content: string) => boolean, state: SearchState) => {
@@ -168,6 +225,17 @@ const ConnectionsPage = () => {
     [],
   )
   const hasTableData = filterConn.length > 0
+  const displayedTraffic = useMemo(
+    () =>
+      filterConn.reduce(
+        (total, connection) => ({
+          up: total.up + connection.upload,
+          down: total.down + connection.download,
+        }),
+        { up: 0, down: 0 },
+      ),
+    [filterConn],
+  )
 
   return (
     <BasePage
@@ -188,11 +256,28 @@ const ConnectionsPage = () => {
       header={
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
           <Box sx={{ mx: 1 }}>
-            {t('shared.labels.downloaded')}:{' '}
-            {parseTraffic(traffic?.downTotal || 0)}
+            {t(
+              applicationFilter
+                ? 'connections.page.visibleDownloaded'
+                : 'shared.labels.downloaded',
+            )}
+            :{' '}
+            {parseTraffic(
+              applicationFilter
+                ? displayedTraffic.down
+                : traffic?.downTotal || 0,
+            )}
           </Box>
           <Box sx={{ mx: 1 }}>
-            {t('shared.labels.uploaded')}: {parseTraffic(traffic?.upTotal || 0)}
+            {t(
+              applicationFilter
+                ? 'connections.page.visibleUploaded'
+                : 'shared.labels.uploaded',
+            )}
+            :{' '}
+            {parseTraffic(
+              applicationFilter ? displayedTraffic.up : traffic?.upTotal || 0,
+            )}
           </Box>
           <IconButton
             color="inherit"
@@ -211,14 +296,57 @@ const ConnectionsPage = () => {
               <TableChartRounded titleAccess={t('shared.actions.tableView')} />
             )}
           </IconButton>
-          <Button size="small" variant="contained" onClick={onCloseAll}>
+          <Button
+            size="small"
+            variant="contained"
+            onClick={onCloseAll}
+            disabled={
+              !!applicationFilter &&
+              (connectionsType !== 'active' || !filterConn.length)
+            }
+          >
             <span style={{ whiteSpace: 'nowrap' }}>
-              {t('shared.actions.closeAll')}
+              {t(
+                applicationFilter
+                  ? 'connections.page.closeFiltered'
+                  : 'shared.actions.closeAll',
+              )}
             </span>
           </Button>
         </Box>
       }
     >
+      {applicationFilter && (
+        <Box
+          sx={{
+            mx: '10px',
+            mt: 1,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1,
+          }}
+        >
+          <Chip
+            size="small"
+            color="primary"
+            variant="outlined"
+            onDelete={clearApplicationFilter}
+            label={
+              applicationFilter.kind === 'application'
+                ? applicationFilter.application.name
+                : `${applicationFilter.name} · PID ${applicationFilter.pid}`
+            }
+            sx={{ maxWidth: 360 }}
+          />
+          <Typography variant="caption" color="text.secondary">
+            {t(
+              applicationFilter.kind === 'application'
+                ? 'connections.page.includingChildren'
+                : 'connections.page.processInstanceOnly',
+            )}
+          </Typography>
+        </Box>
+      )}
       <Box
         sx={{
           pt: 1,
@@ -241,7 +369,7 @@ const ConnectionsPage = () => {
             onClick={() => selectConnectionsType('active')}
           >
             {t('connections.components.actions.active')}{' '}
-            {connections?.activeConnections.length}
+            {scopedConnections.active.length}
           </Button>
           <Button
             size="small"
@@ -249,7 +377,7 @@ const ConnectionsPage = () => {
             onClick={() => selectConnectionsType('closed')}
           >
             {t('connections.components.actions.closed')}{' '}
-            {connections?.closedConnections.length}
+            {scopedConnections.closed.length}
           </Button>
         </ButtonGroup>
         {!isTableLayout && (
@@ -321,7 +449,11 @@ const ConnectionsPage = () => {
       )}
       <ConnectionDetail ref={detailRef} />
       <Zoom
-        in={connectionsType === 'closed' && filterConn.length > 0}
+        in={
+          !applicationFilter &&
+          connectionsType === 'closed' &&
+          filterConn.length > 0
+        }
         unmountOnExit
       >
         <Fab

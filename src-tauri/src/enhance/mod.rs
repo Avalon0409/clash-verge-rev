@@ -1,4 +1,5 @@
 use crate::core::notify::NoticeStatus;
+pub(crate) mod application_profiles;
 mod application_proxy;
 mod chain;
 pub mod field;
@@ -37,7 +38,6 @@ struct ConfigValues {
     clash_config: Mapping,
     clash_core: Option<String>,
     enable_tun: bool,
-    application_proxy: Option<crate::config::application_proxy::ApplicationProxyConfig>,
     enable_builtin: bool,
     socks_enabled: bool,
     http_enabled: bool,
@@ -127,7 +127,6 @@ async fn get_config_values(profile_uid: &str) -> ConfigValues {
         ..
     } = **verge_arc;
     let enable_external_controller = enable_external_controller.unwrap_or(false);
-    let application_proxy = verge_arc.application_proxy.clone();
     let dns_settings = verge_arc.dns_settings_for(profile_uid);
     let dns_override_confirmation = dns_settings.confirmation;
 
@@ -153,7 +152,6 @@ async fn get_config_values(profile_uid: &str) -> ConfigValues {
         clash_config,
         clash_core,
         enable_tun,
-        application_proxy,
         enable_builtin,
         socks_enabled,
         http_enabled,
@@ -876,8 +874,9 @@ async fn apply_dns_settings(config: Mapping, enable_dns_settings: bool) -> (Mapp
 }
 
 /// Returns the enhanced profile, its original keys, script logs, and DNS override decision.
-pub async fn enhance(
+async fn enhance_profile(
     profiles: &IProfiles,
+    notify: bool,
 ) -> Result<(Mapping, HashSet<String>, HashMap<String, ResultLog>, DnsOverrideState)> {
     let profile_uid = profiles.current.as_deref().unwrap_or_default();
     let cfg_vals = get_config_values(profile_uid).await;
@@ -885,7 +884,6 @@ pub async fn enhance(
         clash_config,
         clash_core,
         enable_tun,
-        application_proxy,
         enable_builtin,
         socks_enabled,
         http_enabled,
@@ -962,18 +960,64 @@ pub async fn enhance(
     )
     .await;
 
-    notify_discarded_keys(authoritative.overridden(&authoritative, &authoritative.current(&config)));
+    if notify {
+        notify_discarded_keys(authoritative.overridden(&authoritative, &authoritative.current(&config)));
+    }
     let config = authoritative.enforce(config);
     let config = ensure_lan_bind_address(config);
 
     let config = cleanup_proxy_groups(config);
-    let config = application_proxy::use_application_proxy(config, application_proxy.as_ref())?;
     let config = use_sort(config);
 
     let mut exists_keys_set = HashSet::new();
     exists_keys_set.extend(exists_keys);
 
     Ok((config, exists_keys_set, result_map, dns_override))
+}
+
+pub async fn enhance(
+    profiles: &IProfiles,
+) -> Result<(Mapping, HashSet<String>, HashMap<String, ResultLog>, DnsOverrideState)> {
+    let (config, keys, logs, dns) = enhance_profile(profiles, true).await?;
+    let settings = Config::verge().await.latest_arc().application_proxy.clone();
+    let global_source = config.clone();
+    let mut config = config;
+    if let Some(settings) = settings.as_ref().filter(|settings| settings.enabled) {
+        let mut ids: HashSet<std::string::String> = settings
+            .applications
+            .iter()
+            .filter_map(|entry| entry.profile_uid.as_ref().map(ToString::to_string))
+            .collect();
+        ids.extend(
+            crate::core::application_processes::overrides()
+                .iter()
+                .filter_map(|entry| entry.profile_uid.as_ref().map(ToString::to_string)),
+        );
+        let mut ids: Vec<_> = ids.into_iter().collect();
+        ids.sort();
+        for uid in ids {
+            let Some(item) = profiles
+                .items
+                .as_ref()
+                .and_then(|items| items.iter().find(|item| item.uid.as_deref() == Some(uid.as_str())))
+            else {
+                continue;
+            };
+            if !matches!(item.itype.as_deref(), Some("remote" | "local")) {
+                continue;
+            }
+            let mut selected = profiles.clone();
+            selected.current = Some(uid.clone().into());
+            let foreign = if profiles.current.as_deref() == Some(uid.as_str()) {
+                global_source.clone()
+            } else {
+                enhance_profile(&selected, false).await?.0
+            };
+            application_profiles::import_profile(&mut config, &uid, foreign)?;
+        }
+    }
+    let config = application_proxy::use_application_proxy(config, settings.as_ref())?;
+    Ok((use_sort(config), keys, logs, dns))
 }
 
 #[cfg(test)]

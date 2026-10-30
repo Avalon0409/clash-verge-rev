@@ -191,3 +191,41 @@ it('groups external descendants by app and scopes overrides to the exact process
   expect(newInstance.configured).toBe(false)
   expect(configured).toHaveLength(1)
 })
+
+it('inherits subscription bindings into child processes', () => {
+  const rows = buildApplicationRows(
+    [browser],
+    [
+      {
+        ...browser,
+        enabled: true,
+        routing_mode: 'rule',
+        profile_uid: 'subscription-B',
+        proxy: 'B-Exit',
+      },
+    ],
+    [],
+    1000,
+    {
+      processes: [
+        {
+          pid: 10,
+          parent_pid: null,
+          start_time: 100,
+          name: 'Browser',
+          path: browser.path + '/Contents/MacOS/Browser',
+        },
+        {
+          pid: 11,
+          parent_pid: 10,
+          start_time: 101,
+          name: 'Worker',
+          path: '/external/worker',
+        },
+      ],
+      overrides: [],
+    },
+  )
+  expect(rows[0].profileUid).toBe('subscription-B')
+  expect(rows[0].children![0].children![0].profileUid).toBe('subscription-B')
+})

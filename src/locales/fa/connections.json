@@ -1,6 +1,11 @@
 {
   "page": {
-    "title": "اتصالات"
+    "title": "اتصالات",
+    "visibleDownloaded": "Listed download",
+    "visibleUploaded": "Listed upload",
+    "closeFiltered": "Close filtered",
+    "includingChildren": "Includes child processes",
+    "processInstanceOnly": "Only this process instance"
   },
   "components": {
     "fields": {

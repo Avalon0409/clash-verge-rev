@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next'
 import { BasePage, TooltipIcon } from '@/components/base'
 import { ProviderButton } from '@/components/proxy/provider-button'
 import { ProxyGroups } from '@/components/proxy/proxy-groups'
+import { useClashMode } from '@/hooks/use-clash'
 import {
   useAppRefreshers,
   useClashConfigData,
@@ -51,7 +52,9 @@ const ProxyPage = () => {
     dispatchChainConfigData(value)
   }, [])
 
-  const normalizedMode = clashConfig?.mode?.toLowerCase()
+  const { data: savedMode, refetch: refreshSavedMode } = useClashMode(true)
+  const normalizedMode =
+    savedMode?.toLowerCase() ?? clashConfig?.mode?.toLowerCase()
   const curMode = isMode(normalizedMode) ? normalizedMode : undefined
   const chainWarning = t('proxies.page.chain.warning')
 
@@ -62,7 +65,7 @@ const ProxyPage = () => {
         id: 'patch-clash-mode',
         errorNotice: false,
       })
-      refreshClashConfig()
+      await Promise.allSettled([refreshClashConfig(), refreshSavedMode()])
     } catch (error) {
       showNotice.error(error)
     }

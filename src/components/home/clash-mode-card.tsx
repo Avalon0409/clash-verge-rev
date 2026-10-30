@@ -10,7 +10,6 @@ import { useTranslation } from 'react-i18next'
 import type { BaseConfig } from 'tauri-plugin-mihomo-api'
 
 import { useClashMode, useRuntimeConfig } from '@/hooks/use-clash'
-import { useVerge } from '@/hooks/use-verge'
 import {
   useAppRefreshers,
   useClashConfigData,
@@ -59,8 +58,6 @@ const MODE_ICONS: Record<ClashMode, ReactNode> = {
 
 export const ClashModeCard = () => {
   const { t } = useTranslation()
-  const { verge } = useVerge()
-  const applicationMode = verge?.application_proxy?.enabled === true
   const { clashConfig } = useClashConfigData()
   const { isCoreDataPending } = useCoreDataStatus()
   const { refreshClashConfig } = useAppRefreshers()
@@ -76,11 +73,12 @@ export const ClashModeCard = () => {
     data: backendMode,
     isPending: isBackendModePending,
     refetch: refetchBackendMode,
-  } = useClashMode(needFallback)
+  } = useClashMode(true)
   // Saved config is refreshed on mode changes; runtime config may be stale.
   const fallbackMode = toClashMode(backendMode) ?? runtimeMode
 
-  const resolvedMode = controllerMode ?? fallbackMode
+  const resolvedMode =
+    toClashMode(backendMode) ?? controllerMode ?? fallbackMode
   const currentMode = optimisticMode ?? resolvedMode
 
   const modeDescription = currentMode
@@ -90,7 +88,6 @@ export const ClashModeCard = () => {
       : t('home.components.clashMode.errors.communication')
 
   const onChangeMode = useLockFn(async (mode: ClashMode) => {
-    if (applicationMode && mode !== 'rule') return
     if (mode === currentMode) return
 
     setOptimisticMode(mode)
@@ -181,12 +178,8 @@ export const ClashModeCard = () => {
             key={mode}
             elevation={mode === currentMode ? 2 : 0}
             onClick={() => onChangeMode(mode)}
-            aria-disabled={applicationMode && mode !== 'rule'}
             sx={{
               ...buttonStyles(mode),
-              ...(applicationMode && mode !== 'rule'
-                ? { opacity: 0.4, cursor: 'default' }
-                : {}),
             }}
           >
             {MODE_ICONS[mode]}

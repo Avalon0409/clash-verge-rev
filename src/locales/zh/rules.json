@@ -82,7 +82,7 @@
   "applicationProxy": {
     "title": "应用代理",
     "enable": "仅对指定应用分流",
-    "description": "规则模式先匹配订阅规则：直连和拒绝照常处理，需要代理时走该应用选定节点；未选节点时沿用订阅出口。代理模式全部流量走选定节点。关闭的应用默认直连。",
+    "description": "规则模式先匹配订阅规则：直连和拒绝照常处理，需要代理时走该应用选定节点；未选节点时沿用订阅出口。代理模式全部流量走选定节点。关闭或未配置的应用沿用全局配置。 打开总开关会同步开启 TUN；关闭后本页不可配置，恢复全局分流。",
     "settings": "前往设置",
     "serviceRequired": "TUN 需要可用的系统服务。请先在设置中安装或修复服务，再开启此模式。",
     "active": "TUN 已开启，内核处于规则模式。实际出口请查看下方连接。",
@@ -102,7 +102,7 @@
     "noConnections": "暂无已观察到的活跃连接",
     "disconnect": "断开连接",
     "disconnected": "已断开该应用的连接",
-    "connectionHelp": "开关影响新连接。断开应用的现有连接后，可按新策略重连；这可能中断下载或会话。无法识别的进程默认直连。代理组本身也可能选择直连，实际出口以下方连接链路为准。",
+    "connectionHelp": "开关影响新连接。断开应用的现有连接后，可按新策略重连；这可能中断下载或会话。无法识别的进程沿用全局配置。代理组本身也可能选择直连，实际出口以下方连接链路为准。",
     "disconnectFailed": "有 {{count}} 条连接未能断开，其他连接可能已断开。",
     "saved": "应用设置已保存",
     "duplicate": "该应用已添加",
@@ -146,6 +146,22 @@
     "ruleMode": "规则",
     "proxyMode": "代理",
     "routingMode": "分流模式",
-    "followSubscription": "沿用订阅代理出口"
+    "followSubscription": "沿用订阅代理出口",
+    "processDialogHint": "默认跟随父进程；单独修改为临时覆盖，进程退出后失效。",
+    "processDialogClose": "关闭",
+    "connectedProcesses": "有连接：{{count}}",
+    "temporaryOverrides": "临时覆盖：{{count}}",
+    "processSearch": "搜索进程名称或 PID",
+    "noMatchingProcesses": "没有符合搜索条件的进程。",
+    "noProcesses": "当前应用没有正在运行的进程。",
+    "subscription": "订阅来源",
+    "globalSubscription": "跟随全局当前订阅",
+    "missingSubscription": "订阅已删除",
+    "subscriptionRulesHint": "规则跟随所选订阅。切换订阅会清除原节点选择；规则模式不选节点时，沿用此订阅的分流出口。",
+    "subscriptionReadFailed": "无法读取订阅配置",
+    "viewConnections": "查看连接",
+    "runningOnly": "仅运行中",
+    "runningOnlyHelp": "只显示有运行中进程的应用，即使当前没有联网连接。",
+    "runningEmpty": "没有符合条件的正在运行应用。"
   }
 }

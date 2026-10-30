@@ -20,6 +20,8 @@ pub struct ProcessOverride {
     #[serde(default)]
     pub routing_mode: crate::config::application_proxy::ApplicationRoutingMode,
     pub proxy: Option<smartstring::alias::String>,
+    #[serde(default)]
+    pub profile_uid: Option<smartstring::alias::String>,
 }
 
 #[derive(Serialize)]
@@ -118,6 +120,15 @@ pub async fn validate_identity(pid: u32, start_time: u64) -> Result<ApplicationP
 
 pub async fn update(override_setting: ProcessOverride) -> Result<()> {
     let config_write = crate::config::Config::try_lock_config_write()?;
+    ensure!(
+        crate::config::Config::verge()
+            .await
+            .data_arc()
+            .application_proxy
+            .as_ref()
+            .is_some_and(|settings| settings.enabled),
+        "enable application routing before changing process settings"
+    );
     let process = validate_identity(override_setting.pid, override_setting.start_time).await?;
     ensure!(
         cfg!(target_os = "macos"),
@@ -132,9 +143,18 @@ pub async fn update(override_setting: ProcessOverride) -> Result<()> {
             enabled: override_setting.enabled,
             routing_mode: override_setting.routing_mode,
             proxy: override_setting.proxy.clone(),
+            profile_uid: override_setting.profile_uid.clone(),
         }],
     };
     validation.validate()?;
+    if let Some(uid) = override_setting.profile_uid.as_deref() {
+        let profiles = crate::config::Config::profiles().await.data_arc();
+        let item = profiles.get_item(uid)?;
+        ensure!(
+            matches!(item.itype.as_deref(), Some("remote" | "local")),
+            "select a subscription profile"
+        );
+    }
     let before = overrides();
     let mut candidate = before.clone();
     candidate.retain(|entry| entry.pid != override_setting.pid);
@@ -145,6 +165,15 @@ pub async fn update(override_setting: ProcessOverride) -> Result<()> {
 
 pub async fn reset(pid: u32, start_time: u64) -> Result<()> {
     let config_write = crate::config::Config::try_lock_config_write()?;
+    ensure!(
+        crate::config::Config::verge()
+            .await
+            .data_arc()
+            .application_proxy
+            .as_ref()
+            .is_some_and(|settings| settings.enabled),
+        "enable application routing before changing process settings"
+    );
     let before = overrides();
     let mut candidate = before.clone();
     candidate.retain(|entry| entry.pid != pid || entry.start_time != start_time);

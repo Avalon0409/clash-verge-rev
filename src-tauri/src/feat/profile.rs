@@ -218,7 +218,22 @@ pub async fn update_profile(uid: &String, option: Option<&PrfOption>, is_mannual
     };
     let profiles = Config::profiles().await;
     let is_current = profiles.latest_arc().current.as_ref() == Some(uid);
-    let should_refresh = is_current || (!profile_persisted && is_mannual_trigger);
+    let application_reference = Config::verge()
+        .await
+        .data_arc()
+        .application_proxy
+        .as_ref()
+        .is_some_and(|settings| {
+            settings.enabled
+                && settings
+                    .applications
+                    .iter()
+                    .any(|entry| entry.profile_uid.as_ref() == Some(uid))
+        })
+        || crate::core::application_processes::overrides()
+            .iter()
+            .any(|entry| entry.profile_uid.as_ref() == Some(uid));
+    let should_refresh = is_current || application_reference || (!profile_persisted && is_mannual_trigger);
 
     if should_refresh {
         logging!(debug, Type::Config, "[订阅更新] 更新内核配置");

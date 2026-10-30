@@ -55,6 +55,18 @@ const notifySummaryListeners = () => {
   summaryListeners.forEach((listener) => listener())
 }
 
+const sameProcessAncestors = (
+  left: ConnectionMetadata['processAncestors'],
+  right: ConnectionMetadata['processAncestors'],
+) =>
+  (left?.length ?? 0) === (right?.length ?? 0) &&
+  (left ?? []).every(
+    (ancestor, index) =>
+      ancestor.pid === right?.[index].pid &&
+      ancestor.startTime === right?.[index].startTime &&
+      ancestor.path === right?.[index].path,
+  )
+
 const sameMetadata = (left: ConnectionMetadata, right: ConnectionMetadata) =>
   metadataValue(left.network) === metadataValue(right.network) &&
   metadataValue(left.type) === metadataValue(right.type) &&
@@ -69,7 +81,8 @@ const sameMetadata = (left: ConnectionMetadata, right: ConnectionMetadata) =>
   metadataValue(left.process) === metadataValue(right.process) &&
   metadataValue(left.processPath) === metadataValue(right.processPath) &&
   left.processId === right.processId &&
-  left.processStartTime === right.processStartTime
+  left.processStartTime === right.processStartTime &&
+  sameProcessAncestors(left.processAncestors, right.processAncestors)
 
 const normalizeMetadata = (
   metadata: ConnectionMetadata,
@@ -90,6 +103,7 @@ const normalizeMetadata = (
     processPath: metadata.processPath || '',
     processId: metadata.processId,
     processStartTime: metadata.processStartTime,
+    processAncestors: metadata.processAncestors,
   }
 }
 

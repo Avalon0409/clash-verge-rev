@@ -1,6 +1,11 @@
 {
   "page": {
-    "title": "連線"
+    "title": "連線",
+    "visibleDownloaded": "当前列表下载量",
+    "visibleUploaded": "当前列表上传量",
+    "closeFiltered": "关闭筛选连接",
+    "includingChildren": "包含应用及其子进程",
+    "processInstanceOnly": "仅当前 PID 对应的进程"
   },
   "components": {
     "fields": {

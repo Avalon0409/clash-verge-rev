@@ -3,6 +3,11 @@ use serde::{Deserialize, Serialize};
 use smartstring::alias::String;
 use std::{collections::HashSet, path::Path};
 
+pub fn subscription_prefix(uid: &str) -> std::string::String {
+    use base64::Engine as _;
+    format!("__ap_{}:", base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(uid))
+}
+
 #[derive(Default, Debug, Clone, Deserialize, Serialize)]
 pub struct ApplicationProxyConfig {
     pub enabled: bool,
@@ -40,6 +45,8 @@ pub struct ApplicationProxyEntry {
     #[serde(default)]
     pub routing_mode: ApplicationRoutingMode,
     pub proxy: Option<String>,
+    #[serde(default)]
+    pub profile_uid: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -57,10 +64,16 @@ pub enum ApplicationProxyChange {
         enabled: bool,
         #[serde(default)]
         routing_mode: ApplicationRoutingMode,
+        #[serde(default)]
+        profile_uid: Option<String>,
     },
     SetEnabled {
         path: String,
         enabled: bool,
+    },
+    SetProfile {
+        path: String,
+        profile_uid: Option<String>,
     },
     SetRoutingMode {
         path: String,
@@ -91,6 +104,7 @@ impl ApplicationProxyConfig {
                     enabled: false,
                     routing_mode: ApplicationRoutingMode::Rule,
                     proxy: None,
+                    profile_uid: None,
                 });
             }
             ApplicationProxyChange::Configure {
@@ -98,6 +112,7 @@ impl ApplicationProxyConfig {
                 proxy,
                 enabled,
                 routing_mode,
+                profile_uid,
             } => {
                 let entry = ApplicationProxyEntry {
                     name: application.name,
@@ -106,6 +121,7 @@ impl ApplicationProxyConfig {
                     proxy,
                     enabled,
                     routing_mode,
+                    profile_uid,
                 };
                 if let Some(current) = self.applications.iter_mut().find(|current| current.path == entry.path) {
                     *current = entry;
@@ -114,6 +130,11 @@ impl ApplicationProxyConfig {
                 }
             }
             ApplicationProxyChange::SetEnabled { path, enabled } => self.entry_mut(&path)?.enabled = enabled,
+            ApplicationProxyChange::SetProfile { path, profile_uid } => {
+                let entry = self.entry_mut(&path)?;
+                entry.profile_uid = profile_uid;
+                entry.proxy = None;
+            }
             ApplicationProxyChange::SetRoutingMode { path, routing_mode } => {
                 self.entry_mut(&path)?.routing_mode = routing_mode
             }
@@ -170,6 +191,18 @@ impl ApplicationProxyConfig {
                 );
             }
             if let Some(proxy) = &application.proxy {
+                if let Some(uid) = application.profile_uid.as_deref() {
+                    ensure!(
+                        proxy.starts_with(&subscription_prefix(uid)),
+                        "proxy does not belong to the selected subscription"
+                    );
+                } else {
+                    ensure!(
+                        !proxy.starts_with("__ap_"),
+                        "select the subscription that owns this proxy"
+                    );
+                }
+
                 ensure!(
                     !proxy.contains(',') && !proxy.chars().any(char::is_control),
                     "proxy name cannot contain commas or control characters"
@@ -199,6 +232,28 @@ mod tests {
     use super::*;
 
     #[test]
+    fn node_binding_must_belong_to_its_subscription() -> Result<()> {
+        let mut config = ApplicationProxyConfig {
+            enabled: true,
+            applications: vec![ApplicationProxyEntry {
+                name: "Browser".into(),
+                path: "/usr/local/bin/browser".into(),
+                kind: ApplicationMatchKind::Executable,
+                enabled: true,
+                routing_mode: ApplicationRoutingMode::Rule,
+                profile_uid: Some("B".into()),
+                proxy: Some(format!("{}Exit", subscription_prefix("C")).into()),
+            }],
+        };
+        assert!(config.validate().is_err());
+        config.applications[0].proxy = Some(format!("{}Exit", subscription_prefix("B")).into());
+        config.validate()?;
+        config.applications[0].profile_uid = None;
+        assert!(config.validate().is_err());
+        Ok(())
+    }
+
+    #[test]
     fn existing_entries_default_to_rules_and_keep_the_saved_node() -> Result<()> {
         let config: ApplicationProxyConfig = serde_yaml_ng::from_str(
             "enabled: true\napplications: [{name: Browser, path: /usr/local/bin/browser, kind: executable, enabled: true, proxy: Exit}]",
@@ -214,6 +269,7 @@ mod tests {
                 kind: ApplicationMatchKind::Executable,
             },
             proxy: None,
+            profile_uid: None,
             enabled: true,
             routing_mode: ApplicationRoutingMode::Rule,
         })?;
@@ -264,6 +320,7 @@ mod tests {
                 kind: ApplicationMatchKind::Executable,
             },
             proxy: Some("AnotherExit".into()),
+            profile_uid: None,
             enabled: true,
             routing_mode: ApplicationRoutingMode::Proxy,
         })?;

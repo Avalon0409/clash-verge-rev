@@ -7,6 +7,7 @@ export interface ApplicationRowModel {
   configured: boolean
   enabled: boolean
   routingMode: IApplicationRoutingMode
+  profileUid: string | null
   proxy: string | null
   connections: IConnectionsItem[]
   uploadSpeed: number | null
@@ -75,6 +76,7 @@ export function buildApplicationRows(
       configured: saved.has(application.path),
       enabled: saved.get(application.path)?.enabled ?? false,
       routingMode: saved.get(application.path)?.routing_mode ?? 'rule',
+      profileUid: saved.get(application.path)?.profile_uid ?? null,
       proxy: saved.get(application.path)?.proxy ?? null,
       connections: [],
       uploadSpeed: 0,
@@ -117,6 +119,7 @@ export function buildApplicationRows(
     if (!owner) continue
     let enabled = false
     let routingMode: IApplicationRoutingMode = 'rule'
+    let profileUid: string | null = null
     let proxy: string | null = null
     let inheritedFrom: string | undefined
     let bundleSetting: IApplicationProxyEntry | undefined
@@ -140,6 +143,7 @@ export function buildApplicationRows(
       if (setting) {
         enabled = setting.enabled
         routingMode = setting.routing_mode ?? 'rule'
+        profileUid = setting.profile_uid ?? null
         proxy = setting.proxy
         inheritedFrom =
           ancestor.pid === process.pid && override
@@ -154,6 +158,7 @@ export function buildApplicationRows(
     if (!resolved && bundleSetting) {
       enabled = bundleSetting.enabled
       routingMode = bundleSetting.routing_mode ?? 'rule'
+      profileUid = bundleSetting.profile_uid ?? null
       proxy = bundleSetting.proxy
       inheritedFrom = bundleSetting.name
     }
@@ -171,6 +176,7 @@ export function buildApplicationRows(
       configured: ownOverride,
       enabled,
       routingMode,
+      profileUid,
       proxy,
       connections: [],
       uploadSpeed: 0,
@@ -274,3 +280,13 @@ export function getApplicationProxyHistory(
     )
   return node?.history.at(-1) ?? group?.history.at(-1)
 }
+
+export function applicationProfilePrefix(uid: string) {
+  const encoded = btoa(String.fromCharCode(...new TextEncoder().encode(uid)))
+    .replaceAll('+', '-')
+    .replaceAll('/', '_')
+    .replace(/=+$/, '')
+  return `__ap_${encoded}:`
+}
+export const applicationOutboundLabel = (value: string) =>
+  value.replace(/^__ap_[A-Za-z0-9_-]+:/, '')
