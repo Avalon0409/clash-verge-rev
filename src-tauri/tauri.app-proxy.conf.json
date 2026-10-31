@@ -3,5 +3,10 @@
   "productName": "Clash Verge App Proxy",
   "bundle": {
     "createUpdaterArtifacts": false
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": []
+    }
   }
 }
