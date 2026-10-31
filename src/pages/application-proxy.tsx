@@ -51,6 +51,7 @@ import {
 } from '@/providers/app-data-context'
 import { applicationConnectionsUrl } from '@/services/application-connections'
 import {
+  applicationPathKey,
   disconnectApplicationConnections,
   getApplicationProcesses,
   updateApplicationProcess,
@@ -373,7 +374,13 @@ const ApplicationProxyPage = () => {
   const add = () =>
     run(async () => {
       const application = await resolveProxyApplication(path)
-      if (configured.some((entry) => entry.path === application.path))
+      if (
+        configured.some(
+          (entry) =>
+            applicationPathKey(entry.path) ===
+            applicationPathKey(application.path),
+        )
+      )
         throw new Error(t('rules.applicationProxy.duplicate'))
       await save({ type: 'add', application })
       setAdding(false)

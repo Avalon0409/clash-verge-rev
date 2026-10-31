@@ -1,5 +1,6 @@
 import {
   Box,
+  Button,
   FormControl,
   InputAdornment,
   InputLabel,
@@ -8,6 +9,7 @@ import {
   styled,
   TextField,
 } from '@mui/material'
+import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { useLockFn } from 'ahooks'
 import type { Ref } from 'react'
 import { useEffect, useImperativeHandle, useRef, useState } from 'react'
@@ -21,9 +23,11 @@ import {
   createProfile,
   patchProfile,
   saveAccountProfile,
+  importFreecatProtocol,
 } from '@/services/cmds'
 import { mutate } from '@/services/mutate'
 import { showNotice } from '@/services/notice-service'
+import getSystem from '@/utils/get-system'
 import { version } from '@root/package.json'
 
 import { FileInput } from './file-input'
@@ -50,9 +54,30 @@ export function ProfileViewer({ onChange, ref }: ProfileViewerProps) {
   const [source, setSource] = useState<'remote' | 'local' | 'freecat'>('remote')
   const [password, setPassword] = useState('')
   const isAccount = source === 'freecat'
+  const isWindows = getSystem() === 'windows'
   const { profiles } = useProfiles()
 
   const fileDataRef = useRef<string | null>(null)
+
+  const importProtocol = useLockFn(async () => {
+    const path = await openDialog({ multiple: false, directory: false })
+    if (!path) return
+    setLoading(true)
+    try {
+      await mutate(() => importFreecatProtocol(path), {
+        id: 'import-freecat-protocol',
+        errorNotice: false,
+      })
+      showNotice.success('profiles.modals.profileForm.account.protocolImported')
+    } catch (error) {
+      showNotice.error(
+        'profiles.modals.profileForm.account.protocolImportFailed',
+        error,
+      )
+    } finally {
+      setLoading(false)
+    }
+  })
 
   const { control, watch, setValue, reset, handleSubmit, getValues } =
     useForm<IProfileItem>({
@@ -137,7 +162,9 @@ export function ProfileViewer({ onChange, ref }: ProfileViewerProps) {
         const isRemote = form.type === 'remote'
         const isUpdate = openType === 'edit'
 
-        const isActivating = isUpdate && form.uid === (profiles?.current ?? '')
+        const isActivating = isUpdate
+          ? form.uid === (profiles?.current ?? '')
+          : !profiles?.current
 
         // Preserve proxy settings when the remote retry succeeds through another route.
         const originalOptions = {
@@ -432,7 +459,11 @@ export function ProfileViewer({ onChange, ref }: ProfileViewerProps) {
                 label={t('profiles.modals.profileForm.account.password')}
                 helperText={
                   openType === 'edit'
-                    ? t('profiles.modals.profileForm.account.passwordHint')
+                    ? t(
+                        isWindows
+                          ? 'profiles.modals.profileForm.account.passwordHintWindows'
+                          : 'profiles.modals.profileForm.account.passwordHint',
+                      )
                     : undefined
                 }
               />
@@ -447,11 +478,18 @@ export function ProfileViewer({ onChange, ref }: ProfileViewerProps) {
                     required
                     label={t('profiles.modals.profileForm.fields.userAgent')}
                     helperText={t(
-                      'profiles.modals.profileForm.account.setupHint',
+                      isWindows
+                        ? 'profiles.modals.profileForm.account.setupHintWindows'
+                        : 'profiles.modals.profileForm.account.setupHint',
                     )}
                   />
                 )}
               />
+              {isWindows && (
+                <Button disabled={loading} onClick={importProtocol}>
+                  {t('profiles.modals.profileForm.account.importProtocol')}
+                </Button>
+              )}
             </>
           )}
           {!isAccount && (

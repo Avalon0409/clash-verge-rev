@@ -1,4 +1,7 @@
 node_modules
+!/src/config/
+/src/config/*
+!/src/config/subscription-providers.json
 !src-tauri/src/config/
 !src-tauri/src/config/application_proxy.rs
 .pnpm-store

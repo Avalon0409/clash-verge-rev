@@ -67,6 +67,15 @@ export const updateApplicationProxy = (change: ApplicationProxyChange) =>
     errorNotice: false,
   })
 
+export function applicationPathKey(path: string) {
+  if (!/^[A-Za-z]:[\\/]|^(?:\\\\|\/\/)/.test(path)) return path
+  return path
+    .replaceAll('\\', '/')
+    .toLowerCase()
+    .replace(/^\/\/\?\/unc\//, '//')
+    .replace(/^\/\/\?\//, '')
+}
+
 export const matchesApplication = (
   application: IProxyApplication,
   processPath?: string,
@@ -74,7 +83,7 @@ export const matchesApplication = (
   !!processPath &&
   (application.kind === 'bundle'
     ? processPath.startsWith(application.path + '/')
-    : processPath === application.path)
+    : applicationPathKey(processPath) === applicationPathKey(application.path))
 
 export const disconnectApplication = (
   application: IProxyApplication,

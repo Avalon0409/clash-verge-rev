@@ -20,6 +20,13 @@ use clash_verge_draft::{Draft, SharedDraft};
 use clash_verge_logging::{Type, logging, logging_error};
 use scopeguard::defer;
 use smartstring::alias::String;
+
+#[tauri::command]
+pub async fn import_freecat_protocol(path: std::string::String) -> CmdResult<()> {
+    crate::feat::freecat::import_protocol_file(path.into())
+        .await
+        .with_error_code("ACCOUNT_PROTOCOL_IMPORT_FAILED")
+}
 use std::sync::atomic::{AtomicBool, Ordering};
 
 static CURRENT_SWITCHING_PROFILE: AtomicBool = AtomicBool::new(false);

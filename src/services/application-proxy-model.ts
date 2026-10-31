@@ -1,6 +1,6 @@
 import type { ProxyViewV1 } from '@/types/proxy-view'
 
-import { matchesApplication } from './application-proxy'
+import { applicationPathKey, matchesApplication } from './application-proxy'
 
 export interface ApplicationRowModel {
   application: IProxyApplication
@@ -26,10 +26,13 @@ export function buildApplicationRows(
   snapshot?: IApplicationProcessSnapshot,
 ): ApplicationRowModel[] {
   const applications = new Map(
-    installed.map((application) => [application.path, application]),
+    installed.map((application) => [
+      applicationPathKey(application.path),
+      application,
+    ]),
   )
   for (const application of configured)
-    applications.set(application.path, application)
+    applications.set(applicationPathKey(application.path), application)
   const processIndex = new Map(
     snapshot?.processes.map((process) => [process.pid, process]) ?? [],
   )
@@ -61,23 +64,29 @@ export function buildApplicationRows(
       )
     )
       continue
-    applications.set(path, {
-      name: connection.metadata.process || path.split('/').at(-1) || path,
+    applications.set(applicationPathKey(path), {
+      name: connection.metadata.process || path.split(/[\\/]/).at(-1) || path,
       path,
       kind: 'executable',
     })
   }
   const saved = new Map(
-    configured.map((application) => [application.path, application]),
+    configured.map((application) => [
+      applicationPathKey(application.path),
+      application,
+    ]),
   )
   const rows: ApplicationRowModel[] = [...applications.values()].map(
     (application) => ({
       application,
-      configured: saved.has(application.path),
-      enabled: saved.get(application.path)?.enabled ?? false,
-      routingMode: saved.get(application.path)?.routing_mode ?? 'rule',
-      profileUid: saved.get(application.path)?.profile_uid ?? null,
-      proxy: saved.get(application.path)?.proxy ?? null,
+      configured: saved.has(applicationPathKey(application.path)),
+      enabled:
+        saved.get(applicationPathKey(application.path))?.enabled ?? false,
+      routingMode:
+        saved.get(applicationPathKey(application.path))?.routing_mode ?? 'rule',
+      profileUid:
+        saved.get(applicationPathKey(application.path))?.profile_uid ?? null,
+      proxy: saved.get(applicationPathKey(application.path))?.proxy ?? null,
       connections: [],
       uploadSpeed: 0,
       downloadSpeed: 0,

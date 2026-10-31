@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
+import { applicationPathKey, matchesApplication } from './application-proxy'
 import { buildApplicationRows } from './application-proxy-model'
 
 const browser: IProxyApplication = {
@@ -16,6 +17,36 @@ const helper: IApplicationProxyEntry = {
 }
 
 describe('application traffic aggregation', () => {
+  it('merges Windows executable paths across casing, separators and verbatim prefixes', () => {
+    const application: IProxyApplication = {
+      name: 'Browser',
+      path: 'C:\\Apps\\Browser.exe',
+      kind: 'executable',
+    }
+    const configured = {
+      ...application,
+      path: '\\\\?\\c:\\apps\\browser.exe',
+      enabled: true,
+      proxy: null,
+    }
+    const connection = {
+      id: 'windows',
+      metadata: { processPath: 'c:/APPS/BROWSER.EXE' },
+    } as IConnectionsItem
+    const rows = buildApplicationRows([application], [configured], [connection])
+    expect(rows).toHaveLength(1)
+    expect(rows[0].configured).toBe(true)
+    expect(rows[0].connections).toEqual([connection])
+    expect(applicationPathKey('\\\\?\\UNC\\Server\\Share\\Browser.exe')).toBe(
+      '//server/share/browser.exe',
+    )
+    expect(
+      matchesApplication(
+        browser,
+        '/applications/Browser.app/Contents/MacOS/Browser',
+      ),
+    ).toBe(false)
+  })
   it('puts connected apps first and keeps name ordering when connection counts change', () => {
     const applications: IProxyApplication[] = [
       'Zulu',

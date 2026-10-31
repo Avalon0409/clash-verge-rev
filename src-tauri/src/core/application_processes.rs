@@ -53,6 +53,31 @@ fn identity(pid: u32) -> Option<(u64, u32)> {
     Some((info.pbi_start_tvsec * 1_000_000 + info.pbi_start_tvusec, info.pbi_ppid))
 }
 
+#[cfg(target_os = "windows")]
+fn start_time(pid: u32) -> Option<u64> {
+    use windows_sys::Win32::{
+        Foundation::{CloseHandle, FILETIME},
+        System::Threading::{GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION},
+    };
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle.is_null() {
+            return None;
+        }
+        let mut created: FILETIME = std::mem::zeroed();
+        let mut exited = std::mem::zeroed();
+        let mut kernel = std::mem::zeroed();
+        let mut user = std::mem::zeroed();
+        let success = GetProcessTimes(handle, &mut created, &mut exited, &mut kernel, &mut user);
+        CloseHandle(handle);
+        if success == 0 {
+            return None;
+        }
+        let ticks = (u64::from(created.dwHighDateTime) << 32) | u64::from(created.dwLowDateTime);
+        (ticks / 10).checked_sub(11_644_473_600_000_000)
+    }
+}
+
 fn collect() -> Vec<ApplicationProcess> {
     use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
     let mut system = System::new();
@@ -63,14 +88,19 @@ fn collect() -> Vec<ApplicationProcess> {
             .without_tasks()
             .with_exe(UpdateKind::Always),
     );
-    system
+    let processes: Vec<ApplicationProcess> = system
         .processes()
         .iter()
         .filter_map(|(pid, process)| {
             let path = process.exe()?.to_str()?.to_owned();
             #[cfg(target_os = "macos")]
             let (start_time, parent) = identity(pid.as_u32())?;
-            #[cfg(not(target_os = "macos"))]
+            #[cfg(target_os = "windows")]
+            let (start_time, parent) = (
+                start_time(pid.as_u32())?,
+                process.parent().map_or(0, |parent| parent.as_u32()),
+            );
+            #[cfg(not(any(target_os = "macos", target_os = "windows")))]
             let (start_time, parent) = (
                 process.start_time() * 1_000_000,
                 process.parent().map_or(0, |parent| parent.as_u32()),
@@ -83,7 +113,22 @@ fn collect() -> Vec<ApplicationProcess> {
                 path,
             })
         })
-        .collect()
+        .collect();
+    #[cfg(target_os = "windows")]
+    let processes = {
+        let mut processes = processes;
+        let starts: std::collections::HashMap<_, _> = processes
+            .iter()
+            .map(|process| (process.pid, process.start_time))
+            .collect();
+        for process in &mut processes {
+            process.parent_pid = process
+                .parent_pid
+                .filter(|parent| starts.get(parent).is_some_and(|start| *start <= process.start_time));
+        }
+        processes
+    };
+    processes
 }
 
 pub async fn snapshot() -> Result<ApplicationProcessSnapshot> {
@@ -131,8 +176,8 @@ pub async fn update(override_setting: ProcessOverride) -> Result<()> {
     );
     let process = validate_identity(override_setting.pid, override_setting.start_time).await?;
     ensure!(
-        cfg!(target_os = "macos"),
-        "per-process routing currently requires macOS"
+        cfg!(any(target_os = "macos", target_os = "windows")),
+        "per-process routing requires macOS or Windows"
     );
     let validation = crate::config::application_proxy::ApplicationProxyConfig {
         enabled: true,
@@ -220,14 +265,17 @@ pub(crate) fn start_cleanup() {
     });
 }
 
-#[cfg(all(test, target_os = "macos"))]
+#[cfg(all(test, any(target_os = "macos", target_os = "windows")))]
 mod tests {
     use super::*;
 
     #[tokio::test]
     async fn process_identity_rejects_a_stale_start_time() -> Result<()> {
         let pid = std::process::id();
+        #[cfg(target_os = "macos")]
         let (start_time, _) = identity(pid).context("test process identity")?;
+        #[cfg(target_os = "windows")]
+        let start_time = start_time(pid).context("test process identity")?;
         ensure!(start_time > 0, "process start time must be available");
         let process = validate_identity(pid, start_time).await?;
         ensure!(!process.path.is_empty(), "executable path must be available");

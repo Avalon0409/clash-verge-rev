@@ -3,6 +3,7 @@
 <details>
 <summary><strong> 🐞 修复问题 </strong></summary>
 
+- Fix the first saved subscription remaining inactive until it is applied again.
 - 修复系统托盘代理组行不显示延迟、超时项与未测过项无法区分的问题
 - 修复不同订阅源的同名节点测速和延迟显示指向错误节点的问题
 - 修复端口设置混淆保存值与运行值、输入无效时缺少提示的问题
@@ -36,6 +37,11 @@
 
 - 新增系统托盘代理组中的「测试延迟」菜单项
 - 新增「应用代理」页面，支持指定应用代理开关、未指定应用沿用全局配置、查看应用连接及节点延迟，支持按应用选择规则分流或强制代理，支持独立订阅来源和节点
+
+**🖥️ Windows**
+
+- Add Windows application routing with app discovery, process inheritance and temporary process settings
+- Add Windows Freecat account subscriptions with sign-in and encrypted updates
 
 **🍎 macOS**
 

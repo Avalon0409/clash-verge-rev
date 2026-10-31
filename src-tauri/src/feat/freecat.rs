@@ -9,6 +9,9 @@ use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 use tauri::Url;
 
+#[cfg(target_os = "windows")]
+mod windows;
+
 pub const DEFAULT_USER_AGENT: &str = "freecatencua/v3.1.0 clash-verge Platform/macos";
 const KEYCHAIN_SERVICE: &str = "io.github.clash-verge-rev.subscription-account";
 const VERIFIED_CORE_HASH: &str = "5c715dd468ea8e978de95fcbd852d31525e51e1299be525505ed90729e9d52f6";
@@ -69,7 +72,11 @@ pub(crate) async fn read_secrets(id: &str) -> Result<AccountSecrets> {
                 .map_err(|_| anyhow!("Account credentials are unavailable in Keychain; sign in again"))?;
             serde_json::from_slice(&bytes).map_err(|_| anyhow!("Stored account credentials are invalid"))
         }
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(target_os = "windows")]
+        {
+            windows::read(&id)
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
         {
             let _ = id;
             bail!("Account subscription credential storage currently requires macOS")
@@ -88,7 +95,11 @@ pub(crate) async fn write_secrets(id: &str, secrets: &AccountSecrets) -> Result<
             security_framework::passwords::set_generic_password(KEYCHAIN_SERVICE, &id, &bytes)
                 .map_err(|_| anyhow!("Unable to save account credentials in Keychain"))
         }
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(target_os = "windows")]
+        {
+            windows::write(&id, &bytes)
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
         {
             let _ = (id, bytes);
             bail!("Account subscription credential storage currently requires macOS")
@@ -109,7 +120,11 @@ pub(crate) async fn delete_secrets(id: &str) -> Result<()> {
                 Err(_) => bail!("Unable to remove account credentials from Keychain"),
             }
         }
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(target_os = "windows")]
+        {
+            windows::delete(&id)
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
         {
             let _ = id;
             Ok(())
@@ -342,15 +357,50 @@ fn decrypt_cbc(ciphertext: &[u8], key: &[u8], iv: &[u8]) -> Result<Vec<u8>> {
     Ok(output)
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
+fn decrypt_cbc(ciphertext: &[u8], key: &[u8], iv: &[u8]) -> Result<Vec<u8>> {
+    windows::decrypt(ciphertext, key, iv)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn decrypt_cbc(_ciphertext: &[u8], _key: &[u8], _iv: &[u8]) -> Result<Vec<u8>> {
     bail!("Freecat encrypted subscriptions currently require macOS")
 }
 
 fn import_protocol_material() -> Result<(Vec<u8>, Vec<u8>)> {
-    let binary = std::fs::read("/Applications/自由猫.app/Contents/MacOS/ziyoumaoCore")
+    #[cfg(not(target_os = "macos"))]
+    bail!("Import the verified Freecat 3.1.0 Core file in account settings before signing in");
+    #[cfg(target_os = "macos")]
+    {
+        let binary = std::fs::read("/Applications/自由猫.app/Contents/MacOS/ziyoumaoCore")
         .map_err(|_| anyhow!("First-time Freecat setup requires the verified Freecat 3.1.0 app installed in Applications to import its protocol material"))?;
-    extract_protocol_material(&binary)
+        extract_protocol_material(&binary)
+    }
+}
+
+pub(crate) async fn import_protocol_file(path: std::path::PathBuf) -> Result<()> {
+    let material = tokio::task::spawn_blocking(move || -> Result<AccountSecrets> {
+        use std::io::Read as _;
+        ensure!(path.is_absolute(), "Select an absolute Freecat Core file path");
+        let mut binary = Vec::new();
+        std::fs::File::open(path)
+            .map_err(|_| anyhow!("Unable to open Freecat Core file"))?
+            .take(128 * 1024 * 1024 + 1)
+            .read_to_end(&mut binary)?;
+        ensure!(
+            binary.len() <= 128 * 1024 * 1024,
+            "Freecat Core file exceeds the size limit"
+        );
+        let (key, iv) = extract_protocol_material(&binary)?;
+        Ok(AccountSecrets {
+            key,
+            iv,
+            ..Default::default()
+        })
+    })
+    .await
+    .map_err(|_| anyhow!("Protocol import task failed"))??;
+    write_secrets("freecat.protocol.v3.1.0", &material).await
 }
 
 fn extract_protocol_material(binary: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {

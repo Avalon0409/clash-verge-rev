@@ -8,6 +8,19 @@ pub fn subscription_prefix(uid: &str) -> std::string::String {
     format!("__ap_{}:", base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(uid))
 }
 
+pub fn path_key(path: &str) -> std::string::String {
+    #[cfg(target_os = "windows")]
+    {
+        let path = path.replace('\\', "/").to_lowercase();
+        if let Some(unc) = path.strip_prefix("//?/unc/") {
+            return format!("//{unc}");
+        }
+        path.strip_prefix("//?/").unwrap_or(&path).to_owned()
+    }
+    #[cfg(not(target_os = "windows"))]
+    path.to_owned()
+}
+
 #[derive(Default, Debug, Clone, Deserialize, Serialize)]
 pub struct ApplicationProxyConfig {
     pub enabled: bool,
@@ -94,7 +107,10 @@ impl ApplicationProxyConfig {
             ApplicationProxyChange::SetMode { enabled } => self.enabled = enabled,
             ApplicationProxyChange::Add { application } => {
                 ensure!(
-                    !self.applications.iter().any(|entry| entry.path == application.path),
+                    !self
+                        .applications
+                        .iter()
+                        .any(|entry| path_key(&entry.path) == path_key(&application.path)),
                     "application path is already configured"
                 );
                 self.applications.push(ApplicationProxyEntry {
@@ -123,7 +139,11 @@ impl ApplicationProxyConfig {
                     routing_mode,
                     profile_uid,
                 };
-                if let Some(current) = self.applications.iter_mut().find(|current| current.path == entry.path) {
+                if let Some(current) = self
+                    .applications
+                    .iter_mut()
+                    .find(|current| path_key(&current.path) == path_key(&entry.path))
+                {
                     *current = entry;
                 } else {
                     self.applications.push(entry);
@@ -143,7 +163,7 @@ impl ApplicationProxyConfig {
                 let index = self
                     .applications
                     .iter()
-                    .position(|entry| entry.path == path)
+                    .position(|entry| path_key(&entry.path) == path_key(&path))
                     .context("application is no longer configured")?;
                 self.applications.remove(index);
             }
@@ -154,7 +174,7 @@ impl ApplicationProxyConfig {
     fn entry_mut(&mut self, path: &str) -> Result<&mut ApplicationProxyEntry> {
         self.applications
             .iter_mut()
-            .find(|entry| entry.path == path)
+            .find(|entry| path_key(&entry.path) == path_key(path))
             .context("application is no longer configured")
     }
 
@@ -171,7 +191,7 @@ impl ApplicationProxyConfig {
                 "application path contains control characters"
             );
             ensure!(
-                paths.insert(&application.path),
+                paths.insert(path_key(&application.path)),
                 "application path is already configured"
             );
             if application.kind == ApplicationMatchKind::Bundle {
@@ -231,13 +251,24 @@ impl ApplicationProxyEntry {
 mod tests {
     use super::*;
 
+    const BROWSER_PATH: &str = if cfg!(target_os = "windows") {
+        "C:/Apps/browser.exe"
+    } else {
+        "/usr/local/bin/browser"
+    };
+    const EDITOR_PATH: &str = if cfg!(target_os = "windows") {
+        "C:/Apps/editor.exe"
+    } else {
+        "/usr/local/bin/editor"
+    };
+
     #[test]
     fn node_binding_must_belong_to_its_subscription() -> Result<()> {
         let mut config = ApplicationProxyConfig {
             enabled: true,
             applications: vec![ApplicationProxyEntry {
                 name: "Browser".into(),
-                path: "/usr/local/bin/browser".into(),
+                path: BROWSER_PATH.into(),
                 kind: ApplicationMatchKind::Executable,
                 enabled: true,
                 routing_mode: ApplicationRoutingMode::Rule,
@@ -255,9 +286,9 @@ mod tests {
 
     #[test]
     fn existing_entries_default_to_rules_and_keep_the_saved_node() -> Result<()> {
-        let config: ApplicationProxyConfig = serde_yaml_ng::from_str(
-            "enabled: true\napplications: [{name: Browser, path: /usr/local/bin/browser, kind: executable, enabled: true, proxy: Exit}]",
-        )?;
+        let config: ApplicationProxyConfig = serde_yaml_ng::from_str(&format!(
+            "enabled: true\napplications: [{{name: Browser, path: {BROWSER_PATH}, kind: executable, enabled: true, proxy: Exit}}]"
+        ))?;
         assert_eq!(config.applications[0].routing_mode, ApplicationRoutingMode::Rule);
         assert_eq!(config.applications[0].proxy.as_deref(), Some("Exit"));
         config.validate()?;
@@ -265,7 +296,7 @@ mod tests {
         defaults.apply_change(ApplicationProxyChange::Configure {
             application: ProxyApplication {
                 name: "Browser".into(),
-                path: "/usr/local/bin/browser".into(),
+                path: BROWSER_PATH.into(),
                 kind: ApplicationMatchKind::Executable,
             },
             proxy: None,
@@ -280,7 +311,7 @@ mod tests {
     #[test]
     fn incremental_changes_keep_other_applications_and_survive_serialization() -> Result<()> {
         let mut config = ApplicationProxyConfig::default();
-        for path in ["/usr/local/bin/browser", "/usr/local/bin/editor"] {
+        for path in [BROWSER_PATH, EDITOR_PATH] {
             config.apply_change(ApplicationProxyChange::Add {
                 application: ProxyApplication {
                     name: "Application".into(),
@@ -294,17 +325,17 @@ mod tests {
         assert!(
             invalid
                 .apply_change(ApplicationProxyChange::SetRoutingMode {
-                    path: "/usr/local/bin/browser".into(),
+                    path: BROWSER_PATH.into(),
                     routing_mode: ApplicationRoutingMode::Proxy
                 })
                 .is_err()
         );
         config.apply_change(ApplicationProxyChange::SetProxy {
-            path: "/usr/local/bin/browser".into(),
+            path: BROWSER_PATH.into(),
             proxy: Some("Exit".into()),
         })?;
         config.apply_change(ApplicationProxyChange::SetEnabled {
-            path: "/usr/local/bin/browser".into(),
+            path: BROWSER_PATH.into(),
             enabled: true,
         })?;
         config.apply_change(ApplicationProxyChange::SetMode { enabled: true })?;
@@ -316,7 +347,7 @@ mod tests {
         config.apply_change(ApplicationProxyChange::Configure {
             application: ProxyApplication {
                 name: "Browser".into(),
-                path: "/usr/local/bin/browser".into(),
+                path: BROWSER_PATH.into(),
                 kind: ApplicationMatchKind::Executable,
             },
             proxy: Some("AnotherExit".into()),
@@ -327,6 +358,25 @@ mod tests {
         assert_eq!(config.applications.len(), 2);
         assert_eq!(config.applications[0].proxy.as_deref(), Some("AnotherExit"));
         assert!(!config.applications[1].enabled);
+        #[cfg(target_os = "windows")]
+        {
+            config.apply_change(ApplicationProxyChange::SetEnabled {
+                path: r"\\?\c:\APPS\BROWSER.EXE".into(),
+                enabled: false,
+            })?;
+            assert!(!config.applications[0].enabled);
+            assert!(
+                config
+                    .apply_change(ApplicationProxyChange::Add {
+                        application: ProxyApplication {
+                            name: "Alias".into(),
+                            path: r"C:\apps\Browser.exe".into(),
+                            kind: ApplicationMatchKind::Executable
+                        }
+                    })
+                    .is_err()
+            );
+        }
         Ok(())
     }
 }

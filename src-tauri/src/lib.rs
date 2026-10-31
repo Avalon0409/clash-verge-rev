@@ -208,6 +208,7 @@ mod app_init {
             cmd::patch_profile,
             cmd::create_profile,
             cmd::save_account_profile,
+            cmd::import_freecat_protocol,
             cmd::import_profile,
             cmd::reorder_profile,
             cmd::update_profile,

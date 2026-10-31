@@ -1,8 +1,13 @@
 use super::{CmdResult, WithErrorCode as _};
 use crate::config::application_proxy::{ApplicationMatchKind, ApplicationProxyChange, ProxyApplication};
 use anyhow::{Context as _, Result, ensure};
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(not(target_os = "windows"))]
+use std::path::PathBuf;
 use tokio::fs;
+
+#[cfg(target_os = "windows")]
+mod windows;
 
 #[tauri::command]
 pub async fn update_application_proxy(mut change: ApplicationProxyChange) -> CmdResult<()> {
@@ -42,16 +47,24 @@ pub async fn get_proxy_application_icon(path: String) -> CmdResult<Option<String
             .await
             .with_error_code("APPLICATION_ICON_FAILED")
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        ensure_icon_path(&path).with_error_code("APPLICATION_PATH_INVALID")?;
+        tokio::task::spawn_blocking(move || windows::application_icon(&path))
+            .await
+            .with_error_code("APPLICATION_ICON_FAILED")
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         let _ = path;
         Ok(None)
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 fn ensure_icon_path(path: &str) -> Result<()> {
     ensure!(Path::new(path).is_absolute(), "application path must be absolute");
+    ensure!(!path.contains('\0'), "application path contains a null character");
     Ok(())
 }
 
@@ -94,6 +107,13 @@ async fn resolve_application(path: &Path) -> Result<ProxyApplication> {
         ApplicationMatchKind::Bundle
     } else {
         ensure!(metadata.is_file(), "select an application bundle or executable file");
+        #[cfg(target_os = "windows")]
+        ensure!(
+            path.extension().is_some_and(|extension| extension
+                .to_str()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("exe"))),
+            "select a Windows executable file"
+        );
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt as _;
@@ -111,9 +131,12 @@ async fn resolve_application(path: &Path) -> Result<ProxyApplication> {
     }
     .and_then(|name| name.to_str())
     .context("application name is not valid UTF-8")?;
+    let resolved = path.to_str().context("application path is not valid UTF-8")?;
+    #[cfg(target_os = "windows")]
+    let resolved = windows::display_path(resolved);
     let application = ProxyApplication {
         name: name.into(),
-        path: path.to_str().context("application path is not valid UTF-8")?.into(),
+        path: resolved.into(),
         kind,
     };
     Ok(application)
@@ -124,6 +147,14 @@ pub async fn list_proxy_applications() -> CmdResult<Vec<ProxyApplication>> {
     list_applications().await.with_error_code("APPLICATION_LIST_FAILED")
 }
 
+#[cfg(target_os = "windows")]
+async fn list_applications() -> Result<Vec<ProxyApplication>> {
+    tokio::task::spawn_blocking(windows::list_applications)
+        .await
+        .context("Windows application list task failed")?
+}
+
+#[cfg(not(target_os = "windows"))]
 async fn list_applications() -> Result<Vec<ProxyApplication>> {
     if !cfg!(target_os = "macos") {
         return Ok(Vec::new());
@@ -158,7 +189,7 @@ async fn list_applications() -> Result<Vec<ProxyApplication>> {
     Ok(applications)
 }
 
-#[cfg(all(test, target_os = "macos"))]
+#[cfg(all(test, any(target_os = "macos", target_os = "windows")))]
 mod tests {
     use super::*;
     use base64::{Engine as _, engine::general_purpose::STANDARD};

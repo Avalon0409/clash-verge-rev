@@ -40,6 +40,10 @@ export async function saveAccountProfile(
   return invoke<void>('save_account_profile', { item, index, credentials })
 }
 
+export async function importFreecatProtocol(path: string) {
+  return invoke<void>('import_freecat_protocol', { path })
+}
+
 export async function viewProfile(index: string) {
   return invoke<void>('view_profile', { index })
 }

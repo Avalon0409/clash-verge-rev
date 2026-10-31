@@ -63,7 +63,12 @@ mod tests {
             enabled: true,
             applications: vec![ApplicationProxyEntry {
                 name: "Browser".into(),
-                path: "/usr/local/bin/browser".into(),
+                path: if cfg!(target_os = "windows") {
+                    "C:/Apps/browser.exe"
+                } else {
+                    "/usr/local/bin/browser"
+                }
+                .into(),
                 kind: ApplicationMatchKind::Executable,
                 enabled: true,
                 routing_mode: crate::config::application_proxy::ApplicationRoutingMode::Rule,

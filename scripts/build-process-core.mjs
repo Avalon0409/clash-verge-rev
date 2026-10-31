@@ -1,6 +1,12 @@
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { readFileSync, mkdtempSync, rmSync, copyFileSync } from 'node:fs'
+import {
+  readFileSync,
+  mkdtempSync,
+  rmSync,
+  copyFileSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -12,10 +18,16 @@ const source = JSON.parse(
     'utf8',
   ),
 )
-if (process.platform !== 'darwin')
-  throw new Error('Process instance routing currently targets macOS')
+if (!['darwin', 'win32'].includes(process.platform))
+  throw new Error('Process instance routing supports macOS and Windows')
+const architecture = { arm64: 'aarch64', x64: 'x86_64', ia32: 'i686' }[
+  process.arch
+]
+if (!architecture) throw new Error('Unsupported process routing architecture')
 const host =
-  process.arch === 'arm64' ? 'aarch64-apple-darwin' : 'x86_64-apple-darwin'
+  process.platform === 'win32'
+    ? `${architecture}-pc-windows-msvc.exe`
+    : `${architecture}-apple-darwin`
 const work = mkdtempSync(resolve(tmpdir(), 'mihomo-process-'))
 try {
   const archive = resolve(work, 'source.tar.gz')
@@ -44,11 +56,21 @@ try {
     { cwd: work },
   )
   const env = { ...process.env, CGO_ENABLED: '0' }
-  execFileSync('go', ['test', './rules/common', './component/process', './adapter/outboundgroup', './adapter/provider'], {
-    cwd: work,
-    env,
-    stdio: 'inherit',
-  })
+  execFileSync(
+    'go',
+    [
+      'test',
+      './rules/common',
+      './component/process',
+      './adapter/outboundgroup',
+      './adapter/provider',
+    ],
+    {
+      cwd: work,
+      env,
+      stdio: 'inherit',
+    },
+  )
   execFileSync(
     'go',
     [
@@ -67,6 +89,17 @@ try {
     resolve(root, `src-tauri/sidecar/verge-mihomo-${host}`),
     resolve(root, `src-tauri/sidecar/verge-mihomo-alpha-${host}`),
   )
+  if (process.platform === 'win32') {
+    const digest = createHash('sha256')
+      .update(
+        readFileSync(resolve(root, `src-tauri/sidecar/verge-mihomo-${host}`)),
+      )
+      .digest('hex')
+    writeFileSync(
+      resolve(root, 'src-tauri/packages/windows/core-hashes.nsh'),
+      `!define MIHOMO_SHA256 "${digest}"\n!define MIHOMO_ALPHA_SHA256 "${digest}"\n`,
+    )
+  }
 } finally {
   rmSync(work, { recursive: true, force: true })
 }

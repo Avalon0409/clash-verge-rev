@@ -194,7 +194,7 @@
 --- /dev/null
 +++ b/component/process/process_info_other.go
 @@ -0,0 +1,10 @@
-+//go:build !darwin
++//go:build !darwin && !windows
 +
 +package process
 +
@@ -204,6 +204,138 @@
 +	uid, path, err := findProcessName(network, ip, port)
 +	return Info{UID: uid, Path: path}, err
 +}
+--- /dev/null
++++ b/component/process/process_info_windows.go
+@@ -0,0 +1,72 @@
++package process
++
++import (
++	"net/netip"
++	"unsafe"
++
++	C "github.com/metacubex/mihomo/constant"
++	"golang.org/x/sys/windows"
++)
++
++func findProcessName(network string, ip netip.Addr, port int) (uint32, string, error) {
++	info, err := findProcessInfo(network, ip, port)
++	return info.UID, info.Path, err
++}
++
++func processIdentity(pid uint32) (C.ProcessIdentity, error) {
++	handle, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
++	if err != nil {
++		return C.ProcessIdentity{}, err
++	}
++	defer windows.CloseHandle(handle)
++	var created, exited, kernel, user windows.Filetime
++	if err = windows.GetProcessTimes(handle, &created, &exited, &kernel, &user); err != nil {
++		return C.ProcessIdentity{}, err
++	}
++	path, err := getExecPathFromPID(pid)
++	if err != nil {
++		return C.ProcessIdentity{}, err
++	}
++	// Unix microseconds keep the FILETIME identity exact within JavaScript's integer range.
++	ticks := uint64(created.HighDateTime)<<32 | uint64(created.LowDateTime)
++	return C.ProcessIdentity{PID: pid, Path: path, StartTime: ticks/10 - 11644473600000000}, nil
++}
++
++func processParents() map[uint32]uint32 {
++	parents := make(map[uint32]uint32)
++	snapshot, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
++	if err != nil {
++		return parents
++	}
++	defer windows.CloseHandle(snapshot)
++	entry := windows.ProcessEntry32{Size: uint32(unsafe.Sizeof(windows.ProcessEntry32{}))}
++	for err = windows.Process32First(snapshot, &entry); err == nil; err = windows.Process32Next(snapshot, &entry) {
++		parents[entry.ProcessID] = entry.ParentProcessID
++	}
++	return parents
++}
++
++func findProcessInfo(network string, ip netip.Addr, port int) (Info, error) {
++	pid, path, err := findSocketProcess(network, ip, port)
++	if err != nil {
++		return Info{}, err
++	}
++	info := Info{Path: path, PID: pid}
++	current, err := processIdentity(pid)
++	if err != nil {
++		return info, nil
++	}
++	info.Path, info.StartTime = current.Path, current.StartTime
++	parents := processParents()
++	seen := map[uint32]bool{pid: true}
++	for parent := parents[pid]; parent > 0 && !seen[parent]; parent = parents[parent] {
++		seen[parent] = true
++		ancestor, err := processIdentity(parent)
++		if err != nil || ancestor.StartTime > current.StartTime {
++			break
++		}
++		info.Ancestors = append(info.Ancestors, ancestor)
++		current = ancestor
++	}
++	return info, nil
++}
+--- /dev/null
++++ b/component/process/process_info_windows_test.go
+@@ -0,0 +1,34 @@
++package process
++
++import (
++	"net"
++	"net/netip"
++	"os"
++	"testing"
++)
++
++func TestSocketIdentityIncludesExactProcessInstance(t *testing.T) {
++	listener, err := net.Listen("tcp4", "127.0.0.1:0")
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer listener.Close()
++	connection, err := net.Dial("tcp4", listener.Addr().String())
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer connection.Close()
++	address := connection.LocalAddr().(*net.TCPAddr)
++	ip, _ := netip.AddrFromSlice(address.IP)
++	info, err := findProcessInfo(TCP, ip.Unmap(), address.Port)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if info.PID != uint32(os.Getpid()) || info.StartTime == 0 || info.Path == "" {
++		t.Fatalf("missing socket owner identity: pid=%d start=%d", info.PID, info.StartTime)
++	}
++	identity, err := processIdentity(uint32(os.Getpid()))
++	if err != nil || identity.StartTime != info.StartTime {
++		t.Fatalf("inconsistent process identity: %v", err)
++	}
++}
+--- a/component/process/process_windows.go
++++ b/component/process/process_windows.go
+@@ -61,7 +61,7 @@
+ 	return nil
+ }
+ 
+-func findProcessName(network string, ip netip.Addr, srcPort int) (uint32, string, error) {
++func findSocketProcess(network string, ip netip.Addr, srcPort int) (uint32, string, error) {
+ 	once.Do(func() {
+ 		err := initWin32API()
+ 		if err != nil {
+@@ -100,7 +100,7 @@
+ 		return 0, "", err
+ 	}
+ 	pp, err := getExecPathFromPID(pid)
+-	return 0, pp, err
++	return pid, pp, err
+ }
+ 
+ type searcher struct {
 --- a/constant/metadata.go
 +++ b/constant/metadata.go
 @@ -1,11 +1,13 @@
@@ -334,7 +466,7 @@
 +}
 --- /dev/null
 +++ b/rules/common/application_process.go
-@@ -0,0 +1,142 @@
+@@ -0,0 +1,157 @@
 +package common
 +
 +import (
@@ -342,6 +474,8 @@
 +	"encoding/json"
 +	"fmt"
 +	C "github.com/metacubex/mihomo/constant"
++	"path/filepath"
++	"runtime"
 +	"sort"
 +	"strings"
 +)
@@ -441,7 +575,7 @@
 +		}
 +		for i := range r.Applications {
 +			application := &r.Applications[i]
-+			if application.Kind == "executable" && identity.Path == application.Path {
++			if application.Kind == "executable" && applicationPath(identity.Path) == applicationPath(application.Path) {
 +				return r.route(metadata, application.Enabled, application.Mode, application.Proxy, application.Rules, application.ProfileMissing)
 +			}
 +			if bundle == nil && application.Kind == "bundle" && strings.HasPrefix(identity.Path, application.Path+"/") {
@@ -465,7 +599,7 @@
 +		return nil, err
 +	}
 +	for _, app := range rule.Applications {
-+		if !strings.HasPrefix(app.Path, "/") || app.Kind != "bundle" && app.Kind != "executable" || app.Mode != "" && app.Mode != "rule" && app.Mode != "proxy" {
++		if !filepath.IsAbs(app.Path) || app.Kind != "bundle" && app.Kind != "executable" || app.Mode != "" && app.Mode != "rule" && app.Mode != "proxy" {
 +			return nil, fmt.Errorf("invalid application process policy")
 +		}
 +	}
@@ -477,26 +611,40 @@
 +	sort.SliceStable(rule.Applications, func(i, j int) bool { return len(rule.Applications[i].Path) > len(rule.Applications[j].Path) })
 +	return rule, nil
 +}
++
++func applicationPath(path string) string {
++	if runtime.GOOS != "windows" {
++		return path
++	}
++	path = strings.ToLower(strings.ReplaceAll(path, `\`, "/"))
++	if strings.HasPrefix(path, "//?/unc/") {
++		path = "//" + path[len("//?/unc/"):]
++	} else {
++		path = strings.TrimPrefix(path, "//?/")
++	}
++	return path
++}
 --- /dev/null
 +++ b/rules/common/application_process_test.go
-@@ -0,0 +1,123 @@
+@@ -0,0 +1,131 @@
 +package common
 +
 +import (
 +	"encoding/base64"
 +	"encoding/json"
 +	C "github.com/metacubex/mihomo/constant"
++	"runtime"
 +	"testing"
 +)
 +
 +func TestApplicationProcessInheritanceAndInstanceOverride(t *testing.T) {
-+	policy := ApplicationProcess{Applications: []ApplicationPolicy{{Path: "/Applications/IDE.app", Kind: "bundle", Enabled: true, Proxy: "Exit"}}, Overrides: []ProcessOverride{{PID: 20, StartTime: 100, Enabled: false}}}
++	policy := ApplicationProcess{Applications: []ApplicationPolicy{{Path: testApplicationPath("/Applications/IDE.app"), Kind: "bundle", Enabled: true, Proxy: "Exit"}}, Overrides: []ProcessOverride{{PID: 20, StartTime: 100, Enabled: false}}}
 +	bytes, _ := json.Marshal(policy)
 +	rule, err := NewApplicationProcess(base64.RawURLEncoding.EncodeToString(bytes), "DIRECT")
 +	if err != nil {
 +		t.Fatal(err)
 +	}
-+	metadata := &C.Metadata{ProcessID: 30, ProcessStartTime: 200, ProcessPath: "/sdk/qemu", ProcessAncestors: []C.ProcessIdentity{{PID: 20, StartTime: 100, Path: "/sdk/emulator"}, {PID: 10, StartTime: 50, Path: "/Applications/IDE.app/Contents/MacOS/IDE"}}}
++	metadata := &C.Metadata{ProcessID: 30, ProcessStartTime: 200, ProcessPath: testApplicationPath("/sdk/qemu"), ProcessAncestors: []C.ProcessIdentity{{PID: 20, StartTime: 100, Path: testApplicationPath("/sdk/emulator")}, {PID: 10, StartTime: 50, Path: testApplicationPath("/Applications/IDE.app/Contents/MacOS/IDE")}}}
 +	_, target := rule.Match(metadata, C.RuleMatchHelper{})
 +	if target != "DIRECT" {
 +		t.Fatalf("child must inherit its parent's temporary override: %s", target)
@@ -525,10 +673,10 @@
 +}
 +
 +func TestApplicationRuleModeContinuesSubscriptionRules(t *testing.T) {
-+	policy := ApplicationProcess{Applications: []ApplicationPolicy{{Path: "/Applications/Browser.app", Kind: "bundle", Enabled: true, Mode: "rule", Proxy: "SelectedExit"}}}
++	policy := ApplicationProcess{Applications: []ApplicationPolicy{{Path: testApplicationPath("/Applications/Browser.app"), Kind: "bundle", Enabled: true, Mode: "rule", Proxy: "SelectedExit"}}}
 +	bytes, _ := json.Marshal(policy)
 +	payload := base64.RawURLEncoding.EncodeToString(bytes)
-+	metadata := &C.Metadata{ProcessPath: "/Applications/Browser.app/Contents/MacOS/Browser"}
++	metadata := &C.Metadata{ProcessPath: testApplicationPath("/Applications/Browser.app/Contents/MacOS/Browser")}
 +	for _, adapter := range []string{"DIRECT", "REJECT"} {
 +		rule, err := NewApplicationProcess(payload, adapter)
 +		if err != nil {
@@ -562,8 +710,8 @@
 +}
 +
 +func TestBundledHelpersInheritParentInstanceOverride(t *testing.T) {
-+	r := &ApplicationProcess{adapter: "DIRECT", Applications: []ApplicationPolicy{{Path: "/Applications/Browser.app", Kind: "bundle", Enabled: true, Proxy: "Exit"}}, Overrides: []ProcessOverride{{PID: 10, StartTime: 100, Enabled: false}}}
-+	metadata := &C.Metadata{ProcessID: 20, ProcessStartTime: 200, ProcessPath: "/Applications/Browser.app/Contents/MacOS/Helper", ProcessAncestors: []C.ProcessIdentity{{PID: 10, StartTime: 100, Path: "/Applications/Browser.app/Contents/MacOS/Browser"}}}
++	r := &ApplicationProcess{adapter: "DIRECT", Applications: []ApplicationPolicy{{Path: testApplicationPath("/Applications/Browser.app"), Kind: "bundle", Enabled: true, Proxy: "Exit"}}, Overrides: []ProcessOverride{{PID: 10, StartTime: 100, Enabled: false}}}
++	metadata := &C.Metadata{ProcessID: 20, ProcessStartTime: 200, ProcessPath: testApplicationPath("/Applications/Browser.app/Contents/MacOS/Helper"), ProcessAncestors: []C.ProcessIdentity{{PID: 10, StartTime: 100, Path: testApplicationPath("/Applications/Browser.app/Contents/MacOS/Browser")}}}
 +	_, target := r.Match(metadata, C.RuleMatchHelper{})
 +	if target != "DIRECT" {
 +		t.Fatal("bundled helper must follow its parent's temporary override")
@@ -571,13 +719,13 @@
 +}
 +
 +func TestApplicationSubscriptionRoutingAndGlobalFallback(t *testing.T) {
-+	policy := ApplicationProcess{Fallback: "global", GlobalMode: "rule", TunOnly: true, Applications: []ApplicationPolicy{{Path: "/Applications/Browser.app", Kind: "bundle", Enabled: true, Mode: "rule", Rules: "subscription-B", Proxy: "B-Exit"}}}
++	policy := ApplicationProcess{Fallback: "global", GlobalMode: "rule", TunOnly: true, Applications: []ApplicationPolicy{{Path: testApplicationPath("/Applications/Browser.app"), Kind: "bundle", Enabled: true, Mode: "rule", Rules: "subscription-B", Proxy: "B-Exit"}}}
 +	data, _ := json.Marshal(policy)
 +	rule, err := NewApplicationProcess(base64.RawURLEncoding.EncodeToString(data), "DIRECT")
 +	if err != nil {
 +		t.Fatal(err)
 +	}
-+	metadata := &C.Metadata{Type: C.HTTP, ProcessPath: "/Applications/Browser.app/Contents/MacOS/Browser"}
++	metadata := &C.Metadata{Type: C.HTTP, ProcessPath: testApplicationPath("/Applications/Browser.app/Contents/MacOS/Browser")}
 +	if matched, _ := rule.Match(metadata, C.RuleMatchHelper{}); matched || metadata.ApplicationRuleSet != "" {
 +		t.Fatal("system proxy must use global defaults")
 +	}
@@ -585,7 +733,7 @@
 +	if matched, _ := rule.Match(metadata, C.RuleMatchHelper{}); matched || metadata.ApplicationRuleSet != "subscription-B" || metadata.ApplicationRuleProxy != "B-Exit" {
 +		t.Fatal("TUN app must select its own subscription rules and node")
 +	}
-+	metadata.ProcessPath = "/unconfigured/process"
++	metadata.ProcessPath = testApplicationPath("/unconfigured/process")
 +	if matched, _ := rule.Match(metadata, C.RuleMatchHelper{}); matched {
 +		t.Fatal("unconfigured TUN traffic must use global rules")
 +	}
@@ -597,10 +745,46 @@
 +	if matched, target := rule.Match(metadata, C.RuleMatchHelper{}); !matched || target != "DIRECT" {
 +		t.Fatal("unconfigured traffic must honor global direct mode")
 +	}
-+	metadata.ProcessPath = "/Applications/Browser.app/Contents/MacOS/Browser"
++	metadata.ProcessPath = testApplicationPath("/Applications/Browser.app/Contents/MacOS/Browser")
 +	rule.Applications[0].ProfileMissing = true
 +	if matched, target := rule.Match(metadata, C.RuleMatchHelper{}); !matched || target != "REJECT" {
 +		t.Fatal("removed subscription must not silently use another subscription")
++	}
++}
++
++func testApplicationPath(path string) string {
++	if runtime.GOOS == "windows" {
++		return "C:" + path
++	}
++	return path
++}
+--- /dev/null
++++ b/rules/common/application_process_windows_test.go
+@@ -0,0 +1,26 @@
++package common
++
++import (
++	"encoding/base64"
++	"encoding/json"
++	C "github.com/metacubex/mihomo/constant"
++	"testing"
++)
++
++func TestWindowsApplicationPathNormalization(t *testing.T) {
++	for _, path := range []string{`C:\Apps\Browser.exe`, `\\Server\Share\Browser.exe`} {
++		policy := ApplicationProcess{Applications: []ApplicationPolicy{{Path: path, Kind: "executable", Enabled: true, Mode: "proxy", Proxy: "Exit"}}}
++		data, _ := json.Marshal(policy)
++		rule, err := NewApplicationProcess(base64.RawURLEncoding.EncodeToString(data), "DIRECT")
++		if err != nil {
++			t.Fatal(err)
++		}
++		candidate := `\\?\c:/APPS/BROWSER.EXE`
++		if path[0] == '\\' {
++			candidate = `\\?\unc\SERVER\share\browser.exe`
++		}
++		if matched, target := rule.Match(&C.Metadata{ProcessPath: candidate}, C.RuleMatchHelper{}); !matched || target != "Exit" {
++			t.Fatalf("Windows paths must select the configured application: %s", target)
++		}
 +	}
 +}
 --- a/rules/parser.go

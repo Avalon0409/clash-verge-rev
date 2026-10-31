@@ -146,6 +146,11 @@
         }
       },
       "account": {
+        "passwordHintWindows": "Leave blank to use the password stored in Windows Credential Manager",
+        "setupHintWindows": "Supports the verified Freecat 3.1.0 login and subscription format. Before the first sign-in, import ziyoumaoCore from the verified macOS app. The file is read without running it.",
+        "importProtocol": "Import Freecat 3.1.0 Core file",
+        "protocolImported": "Freecat protocol material imported",
+        "protocolImportFailed": "Unable to import Freecat protocol material",
         "source": "自由貓帳號",
         "server": "伺服器位址",
         "serverHint": "填寫 HTTPS 登入服務位址，而非訂閱下載連結",

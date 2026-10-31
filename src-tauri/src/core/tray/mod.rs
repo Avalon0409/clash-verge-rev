@@ -479,12 +479,6 @@ impl Tray {
         Ok(())
     }
 
-    pub async fn update_menu_and_icon(&self) {
-        logging_error!(Type::Tray, self.update_menu().await);
-        let verge = Config::verge().await.data_arc();
-        logging_error!(Type::Tray, self.update_icon(&verge).await);
-    }
-
     async fn create_tray_from_handle(&self, app_handle: &AppHandle) -> Result<()> {
         if handle::Handle::global().is_exiting() {
             logging!(debug, Type::Tray, "应用正在退出，跳过托盘创建");

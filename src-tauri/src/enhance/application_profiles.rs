@@ -82,8 +82,30 @@ fn rename_rule(
             }
         }
     }
-    let result = fields.join(",");
-    result
+    fields.join(",")
+}
+
+fn rename_group_members(
+    group: &mut Mapping,
+    uid: &str,
+    proxies: &HashMap<std::string::String, std::string::String>,
+    providers: &HashMap<std::string::String, std::string::String>,
+) {
+    group.insert("hidden".into(), true.into());
+    if let Some(names) = group.get_mut("proxies").and_then(Value::as_sequence_mut) {
+        for name in names {
+            if let Some(value) = name.as_str().map(ToOwned::to_owned)
+                && !matches!(value.as_str(), "DIRECT" | "REJECT" | "REJECT-DROP" | "PASS")
+            {
+                *name = Value::from(proxies.get(&value).cloned().unwrap_or_else(|| alias(uid, &value)));
+            }
+        }
+    }
+    if let Some(names) = group.get_mut("use").and_then(Value::as_sequence_mut) {
+        for name in names {
+            rename(name, providers);
+        }
+    }
 }
 
 pub fn import_profile(target: &mut Mapping, uid: &str, source: Mapping) -> Result<()> {
@@ -137,22 +159,7 @@ pub fn import_profile(target: &mut Mapping, uid: &str, source: Mapping) -> Resul
                     rename(value, &proxies);
                 }
                 if key == "proxy-groups" {
-                    map.insert("hidden".into(), true.into());
-                    if let Some(names) = map.get_mut(Value::from("proxies")).and_then(Value::as_sequence_mut) {
-                        for name in names {
-                            if let Some(value) = name.as_str().map(ToOwned::to_owned) {
-                                if !matches!(value.as_str(), "DIRECT" | "REJECT" | "REJECT-DROP" | "PASS") {
-                                    *name =
-                                        Value::from(proxies.get(&value).cloned().unwrap_or_else(|| alias(uid, &value)));
-                                }
-                            }
-                        }
-                    }
-                    if let Some(names) = map.get_mut(Value::from("use")).and_then(Value::as_sequence_mut) {
-                        for name in names {
-                            rename(name, &proxy_providers);
-                        }
-                    }
+                    rename_group_members(map, uid, &proxies, &proxy_providers);
                 }
             }
         }

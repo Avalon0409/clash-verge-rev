@@ -383,12 +383,17 @@ export interface TranslationResources {
             defaultName: string
             editLogin: string
             email: string
+            importProtocol: string
             loginAndSave: string
             password: string
             passwordHint: string
+            passwordHintWindows: string
+            protocolImported: string
+            protocolImportFailed: string
             server: string
             serverHint: string
             setupHint: string
+            setupHintWindows: string
             source: string
           }
           errors: {

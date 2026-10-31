@@ -35,7 +35,7 @@ pub async fn update_application_proxy(change: crate::config::application_proxy::
 pub async fn patch_clash(patch: &Mapping) -> Result<()> {
     let config_write = Config::try_lock_config_write()?;
     if let Some(mode) = patch.get("mode").and_then(serde_yaml_ng::Value::as_str) {
-        ensure_application_proxy_mode(mode).await?;
+        ensure_application_proxy_mode(mode)?;
     }
     super::executor::apply(
         &config_write,
@@ -91,7 +91,7 @@ pub(crate) async fn apply_verge_patch_locked(
     .await
 }
 
-pub(super) async fn ensure_application_proxy_mode(mode: &str) -> Result<()> {
+fn ensure_application_proxy_mode(mode: &str) -> Result<()> {
     anyhow::ensure!(matches!(mode, "rule" | "global" | "direct"), "invalid proxy mode");
     Ok(())
 }

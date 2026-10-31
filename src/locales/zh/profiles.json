@@ -146,6 +146,11 @@
         }
       },
       "account": {
+        "passwordHintWindows": "留空以使用 Windows 凭据管理器保存的密码",
+        "setupHintWindows": "支持已验证的自由猫 3.1.0 登录和订阅格式。首次登录前，导入该版本 Mac 应用包中的 ziyoumaoCore 文件；只读取文件，无需运行。",
+        "importProtocol": "导入自由猫 3.1.0 Core 文件",
+        "protocolImported": "自由猫协议参数已导入",
+        "protocolImportFailed": "自由猫协议参数导入失败",
         "source": "自由猫账号",
         "server": "服务端地址",
         "serverHint": "填写 HTTPS 登录服务地址，不是订阅下载链接",
