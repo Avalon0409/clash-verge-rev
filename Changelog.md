@@ -1,3 +1,12 @@
+## v2.5.9
+
+<details>
+<summary><strong> 🐞 修复问题 </strong></summary>
+
+- Fix Freecat account sign-in on fresh installations without importing a Core file.
+
+</details>
+
 ## v2.5.8
 
 <details>

@@ -202,18 +202,7 @@ pub(crate) async fn fetch(
     if secrets.key.is_empty() || secrets.iv.is_empty() {
         let (key, iv) = match read_secrets("freecat.protocol.v3.1.0").await {
             Ok(material) if material.key.len() == 16 && material.iv.len() == 16 => (material.key, material.iv),
-            _ => {
-                let (key, iv) = tokio::task::spawn_blocking(import_protocol_material)
-                    .await
-                    .map_err(|_| anyhow!("Protocol import task failed"))??;
-                let material = AccountSecrets {
-                    key: key.clone(),
-                    iv: iv.clone(),
-                    ..Default::default()
-                };
-                write_secrets("freecat.protocol.v3.1.0", &material).await?;
-                (key, iv)
-            }
+            _ => bundled_protocol_material(),
         };
         secrets.key = key;
         secrets.iv = iv;
@@ -367,15 +356,9 @@ fn decrypt_cbc(_ciphertext: &[u8], _key: &[u8], _iv: &[u8]) -> Result<Vec<u8>> {
     bail!("Freecat encrypted subscriptions currently require macOS")
 }
 
-fn import_protocol_material() -> Result<(Vec<u8>, Vec<u8>)> {
-    #[cfg(not(target_os = "macos"))]
-    bail!("Import the verified Freecat 3.1.0 Core file in account settings before signing in");
-    #[cfg(target_os = "macos")]
-    {
-        let binary = std::fs::read("/Applications/自由猫.app/Contents/MacOS/ziyoumaoCore")
-        .map_err(|_| anyhow!("First-time Freecat setup requires the verified Freecat 3.1.0 app installed in Applications to import its protocol material"))?;
-        extract_protocol_material(&binary)
-    }
+fn bundled_protocol_material() -> (Vec<u8>, Vec<u8>) {
+    const MATERIAL: &[u8; 32] = include_bytes!("freecat/protocol-v3.1.0.bin");
+    (MATERIAL[..16].to_vec(), MATERIAL[16..].to_vec())
 }
 
 pub(crate) async fn import_protocol_file(path: std::path::PathBuf) -> Result<()> {
@@ -512,6 +495,20 @@ fn extract_protocol_material(binary: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
 mod tests {
     use super::*;
 
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    #[test]
+    fn bundled_protocol_decodes_a_subscription_without_imported_material() -> Result<()> {
+        let (key, iv) = bundled_protocol_material();
+        assert_eq!(
+            decode_subscription(
+                "SZjNN6kSrKYq9wlU9C1ZxUMvOhpxFTaaDoeNkuFL9tVaRqLDOMsNfVy4Dicn0TxqLZz8EEowOC/nbqZgXSRb7Q==",
+                &key,
+                &iv
+            )?,
+            "proxies: []\nproxy-groups: []\nrules: []\n"
+        );
+        Ok(())
+    }
     #[test]
     fn account_server_rejects_credentials_and_insecure_urls() {
         for server in [
