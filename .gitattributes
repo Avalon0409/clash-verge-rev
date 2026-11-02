@@ -3,3 +3,4 @@ Changelog.md merge=union
 *.sh text eol=lf
 *.bash text eol=lf
 /src-tauri/src/feat/freecat/protocol-v3.1.0.bin binary
+patches/mihomo-application-process.patch text eol=lf
