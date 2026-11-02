@@ -1,4 +1,5 @@
 use super::{CmdResult, CommandFailure, WithErrorCode as _, proxy_aware_coded_error, proxy_aware_error};
+use crate::config::dns::{DnsOverrideScope, dns_config_path};
 use crate::core::notify::NoticeStatus;
 use crate::feat;
 use crate::utils::{dirs, yaml_emitter};
@@ -14,7 +15,26 @@ use crate::{
 use clash_verge_logging::{Type, logging, logging_error};
 use serde_yaml_ng::Mapping;
 use smartstring::alias::String;
-use tokio::fs;
+
+async fn selected_dns_config_path(
+    profile_uid: Option<String>,
+    scope: Option<DnsOverrideScope>,
+) -> CmdResult<(std::path::PathBuf, String, DnsOverrideScope)> {
+    let profiles = Config::profiles().await.data_arc();
+    let uid = profile_uid.or_else(|| profiles.current.clone()).unwrap_or_default();
+    let scope = match scope {
+        Some(scope) => scope,
+        None => Config::verge().await.latest_arc().dns_scope(),
+    };
+    if scope == DnsOverrideScope::Profile {
+        let item = profiles.get_item(&uid).stringify_err()?;
+        if !matches!(item.itype.as_deref(), Some("remote" | "local")) {
+            return Err("Select a subscription for DNS settings".into());
+        }
+    }
+    let app_dir = dirs::app_home_dir().stringify_err()?;
+    Ok((dns_config_path(&app_dir, scope, &uid).stringify_err()?, uid, scope))
+}
 
 #[tauri::command]
 pub async fn copy_clash_env() -> CmdResult {
@@ -103,6 +123,24 @@ pub async fn upgrade_clash_core(force: bool) -> CmdResult<feat::CoreUpgradeRepor
 }
 
 #[tauri::command]
+pub async fn use_bundled_clash_core() -> CmdResult {
+    let core = Config::verge().await.latest_arc().get_valid_clash_core();
+    let path = tauri::utils::platform::current_exe()
+        .stringify_err()?
+        .with_file_name(format!("{core}{}", std::env::consts::EXE_SUFFIX));
+    crate::core::service::stage_approved_core(&path).with_error_code("BUNDLED_CORE_INSTALL_FAILED")?;
+    if Config::verge().await.latest_arc().get_valid_clash_core() != core {
+        return Err("The selected core changed; retry applying the bundled core".into());
+    }
+    CoreManager::global()
+        .restart_core()
+        .await
+        .with_error_code("BUNDLED_CORE_RESTART_FAILED")?;
+    handle::Handle::refresh_clash();
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn test_delay(url: String) -> CmdResult<u32> {
     let result = match feat::test_delay(url).await {
         Ok(delay) => delay,
@@ -115,14 +153,28 @@ pub async fn test_delay(url: String) -> CmdResult<u32> {
 }
 
 #[tauri::command]
-pub async fn save_dns_config(dns_config: Mapping) -> CmdResult {
-    use crate::utils::dirs;
+pub async fn save_dns_config(
+    mut dns_config: Mapping,
+    profile_uid: Option<String>,
+    scope: Option<DnsOverrideScope>,
+) -> CmdResult {
     use tokio::fs;
 
-    let dns_path = dirs::app_home_dir().stringify_err()?.join(constants::files::DNS_CONFIG);
+    let _config_write = Config::lock_config_write().await;
+    let (dns_path, uid, scope) = selected_dns_config_path(profile_uid, scope).await?;
+    crate::config::dns::migrate_profile_dns_configs()
+        .await
+        .stringify_err()?;
 
+    if scope == DnsOverrideScope::Global {
+        dns_config = crate::feat::qualify_global_dns(dns_config, &uid)
+            .await
+            .stringify_err()?;
+    }
     let yaml_str = yaml_emitter::to_mihomo_config_string(&dns_config).stringify_err()?;
-    fs::write(&dns_path, yaml_str).await.stringify_err()?;
+    fs::write(&dns_path, yaml_str).await.stringify_err_log(|error| {
+        logging!(error, Type::Config, "Failed to save DNS settings: {error:#}");
+    })?;
     logging!(info, Type::Config, "DNS config saved to {dns_path:?}");
 
     Ok(())
@@ -146,55 +198,15 @@ pub async fn set_dns_override(
 
 #[tauri::command]
 pub async fn apply_dns_config(apply: bool) -> CmdResult {
-    if apply {
-        let dns_path = dirs::app_home_dir().stringify_err()?.join(constants::files::DNS_CONFIG);
-
-        if !dns_path.exists() {
-            logging!(warn, Type::Config, "DNS config file not found: {}", dns_path.display());
-            return Err("DNS config file not found".into());
-        }
-
-        let dns_yaml = fs::read_to_string(&dns_path).await.stringify_err_log(|e| {
-            logging!(
-                error,
-                Type::Config,
-                "Failed to read DNS config {}: {e}",
-                dns_path.display()
-            );
-        })?;
-
-        let patch_config = serde_yaml_ng::from_str::<serde_yaml_ng::Mapping>(&dns_yaml).stringify_err_log(|e| {
-            logging!(
-                error,
-                Type::Config,
-                "Failed to parse DNS config {}: {e}",
-                dns_path.display()
-            );
-        })?;
-
-        let mut patch = serde_yaml_ng::Mapping::new();
-        patch.insert("dns".into(), patch_config.into());
-
-        Config::runtime().await.edit_draft(|d| {
-            d.patch_config(&patch);
-        });
-
-        CoreManager::global().update_config_checked().await.map_err(|error| {
-            logging!(error, Type::Config, "failed to apply the config with DNS: {error:#}");
-            proxy_aware_error(&error)
-        })?;
-
-        logging!(info, Type::Config, "DNS config successfully applied");
-    } else {
-        logging!(info, Type::Config, "DNS settings disabled, regenerating config");
-
-        CoreManager::global().update_config_checked().await.map_err(|error| {
-            logging!(error, Type::Config, "failed to apply the regenerated config: {error:#}");
-            proxy_aware_error(&error)
-        })?;
-
-        logging!(info, Type::Config, "Config regenerated successfully");
-    }
+    logging!(
+        info,
+        Type::Config,
+        "Regenerating scoped DNS configuration, enabled={apply}"
+    );
+    CoreManager::global()
+        .update_config_checked()
+        .await
+        .map_err(|error| proxy_aware_error(&error))?;
 
     logging_error!(Type::Config, Config::sync_dns_override().await);
     handle::Handle::refresh_clash();
@@ -202,11 +214,33 @@ pub async fn apply_dns_config(apply: bool) -> CmdResult {
 }
 
 #[tauri::command]
-pub async fn get_dns_config_content() -> CmdResult<Option<String>> {
+pub async fn get_dns_config_content(
+    profile_uid: Option<String>,
+    scope: Option<DnsOverrideScope>,
+) -> CmdResult<Option<String>> {
     use crate::utils::dirs;
     use tokio::fs;
 
-    let dns_path = dirs::app_home_dir().stringify_err()?.join(constants::files::DNS_CONFIG);
+    let (mut dns_path, uid, scope) = selected_dns_config_path(profile_uid, scope).await?;
+    if scope == DnsOverrideScope::Profile && !dns_path.exists() {
+        if Config::verge()
+            .await
+            .latest_arc()
+            .profile_dns_settings
+            .get(&uid)
+            .is_some_and(|setting| setting.enabled)
+        {
+            dns_path = dirs::app_home_dir().stringify_err()?.join(constants::files::DNS_CONFIG);
+        } else {
+            let mut profiles = (**Config::profiles().await.data_arc()).clone();
+            profiles.current = Some(uid);
+            let mut source = profiles.current_mapping().await.stringify_err()?;
+            source.retain(|key, _| matches!(key.as_str(), Some("dns" | "hosts")));
+            return Ok(Some(
+                yaml_emitter::to_mihomo_config_string(&source).stringify_err()?.into(),
+            ));
+        }
+    }
 
     match fs::read_to_string(&dns_path).await {
         Ok(content) => Ok(Some(content.into())),
@@ -216,9 +250,11 @@ pub async fn get_dns_config_content() -> CmdResult<Option<String>> {
 }
 
 #[tauri::command]
-pub async fn validate_dns_config() -> CmdResult<ValidationOutcome> {
-    let app_dir = dirs::app_home_dir().stringify_err()?;
-    let dns_path = app_dir.join(constants::files::DNS_CONFIG);
+pub async fn validate_dns_config(
+    profile_uid: Option<String>,
+    scope: Option<DnsOverrideScope>,
+) -> CmdResult<ValidationOutcome> {
+    let (dns_path, _, _) = selected_dns_config_path(profile_uid, scope).await?;
     let dns_path_str = dns_path.to_str().unwrap_or_default();
 
     if !dns_path.exists() {

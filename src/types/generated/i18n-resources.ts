@@ -1052,6 +1052,7 @@ export interface TranslationResources {
           }
         }
         clashCore: {
+          useBundled: string
           variants: {
             alpha: string
             release: string
@@ -1084,6 +1085,9 @@ export interface TranslationResources {
         }
         dns: {
           dialog: {
+            followProfile: string
+            global: string
+            globalScope: string
             profileScope: string
             title: string
             warning: string

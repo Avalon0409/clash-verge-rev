@@ -305,7 +305,8 @@
       "variants": {
         "release": "Versión estable",
         "alpha": "Versión alfa"
-      }
+      },
+      "useBundled": "Usar núcleo incluido"
     },
     "liteMode": {
       "title": "Configuración del modo ligero",
@@ -511,8 +512,11 @@
     "dns": {
       "dialog": {
         "title": "Sobrescritura de DNS",
-        "profileScope": "El estado del interruptor de sobrescritura de DNS se guarda por separado para cada perfil y solo se aplica a ese perfil.",
-        "warning": "Si no está seguro de cómo configurar esto, no realice cambios y mantenga deshabilitada la sobrescritura de DNS."
+        "profileScope": "Guarda el DNS por suscripción. Las aplicaciones usan el DNS de la suscripción seleccionada.",
+        "warning": "Si no está seguro de cómo configurar esto, no realice cambios y mantenga deshabilitada la sobrescritura de DNS.",
+        "global": "Global",
+        "followProfile": "Seguir suscripción",
+        "globalScope": "Una configuración DNS para todas las aplicaciones y suscripciones; se mantiene al cambiar de suscripción."
       },
       "protection": {
         "title": "Enable DNS Overwrite?",

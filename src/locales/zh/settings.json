@@ -305,7 +305,8 @@
       "variants": {
         "release": "正式版",
         "alpha": "预览版"
-      }
+      },
+      "useBundled": "使用内置内核"
     },
     "liteMode": {
       "title": "轻量模式设置",
@@ -511,8 +512,11 @@
     "dns": {
       "dialog": {
         "title": "DNS 覆写",
-        "profileScope": "DNS 覆写开关按订阅独立保存，仅对对应订阅生效。",
-        "warning": "如果你不清楚这里的设置请不要修改，并保持 DNS 覆写关闭"
+        "profileScope": "每份订阅独立保存 DNS 配置，应用使用所选订阅对应的 DNS。",
+        "warning": "如果你不清楚这里的设置请不要修改，并保持 DNS 覆写关闭",
+        "global": "全局",
+        "followProfile": "跟随订阅",
+        "globalScope": "所有应用和订阅统一使用这套 DNS，切换订阅继续生效。"
       },
       "protection": {
         "title": "是否开启 DNS 覆写？",

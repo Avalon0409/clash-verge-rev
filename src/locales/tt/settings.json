@@ -305,7 +305,8 @@
       "variants": {
         "release": "Рәсми версия",
         "alpha": "Альфа-версия"
-      }
+      },
+      "useBundled": "Use bundled core"
     },
     "liteMode": {
       "title": "LightWeight Mode Settings",
@@ -512,7 +513,10 @@
       "dialog": {
         "title": "DNS Overwrite",
         "profileScope": "DNS көйләүләрен алыштыру күчергеченең хәле һәр профиль өчен аерым саклана һәм шул профильгә генә кагыла.",
-        "warning": "If you are not familiar with these settings, please do not modify them and keep DNS Overwrite disabled"
+        "warning": "If you are not familiar with these settings, please do not modify them and keep DNS Overwrite disabled",
+        "global": "Global",
+        "followProfile": "Follow subscription",
+        "globalScope": "Apply one DNS configuration to all applications and subscriptions. Switching subscriptions keeps these settings."
       },
       "protection": {
         "title": "Enable DNS Overwrite?",

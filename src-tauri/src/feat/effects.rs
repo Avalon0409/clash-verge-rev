@@ -77,6 +77,8 @@ verge_registry! {
     enable_proxy_guard => [SystemProxy];
     enable_bypass_check => NoEffect;
     enable_dns_settings => NoEffect;
+    dns_override_scope => [ClashConfig];
+    global_dns_settings => [ClashConfig];
     profile_dns_settings => NoEffect;
     use_default_bypass => [SystemProxy];
     system_proxy_bypass => [SystemProxy];

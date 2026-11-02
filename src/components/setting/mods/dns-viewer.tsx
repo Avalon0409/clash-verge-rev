@@ -40,6 +40,7 @@ import {
   getDnsConfigContent,
   saveDnsConfig,
   validateDnsConfig,
+  type DnsConfigTarget,
 } from '@/services/cmds'
 import { mutate } from '@/services/mutate'
 import { showNotice } from '@/services/notice-service'
@@ -195,11 +196,11 @@ export function DnsViewer({ ref }: { ref?: Ref<DialogRef> }) {
   const { mutateClash } = useClash()
   const { verge } = useVerge()
   const { current: currentProfile } = useProfiles()
-  const dnsEnabled = currentProfile
-    ? (verge?.profile_dns_settings?.[currentProfile.uid]?.enabled ??
-      verge?.enable_dns_settings ??
-      false)
-    : false
+  const dnsScope = verge?.dns_override_scope ?? 'profile'
+  const editorTargetRef = useRef<DnsConfigTarget>({
+    scope: dnsScope,
+    profileUid: currentProfile?.uid,
+  })
   const themeMode = useThemeMode()
 
   const [open, setOpen] = useState(false)
@@ -471,7 +472,7 @@ export function DnsViewer({ ref }: { ref?: Ref<DialogRef> }) {
 
   const initDnsConfig = useCallback(async () => {
     try {
-      const dnsConfig = await getDnsConfigContent()
+      const dnsConfig = await getDnsConfigContent(editorTargetRef.current)
 
       if (dnsConfig !== null) {
         const config = yaml.load(dnsConfig) as any
@@ -491,12 +492,16 @@ export function DnsViewer({ ref }: { ref?: Ref<DialogRef> }) {
     ref,
     () => ({
       open: () => {
+        editorTargetRef.current = {
+          scope: dnsScope,
+          profileUid: currentProfile?.uid,
+        }
         setOpen(true)
         void initDnsConfig()
       },
       close: () => setOpen(false),
     }),
-    [initDnsConfig],
+    [initDnsConfig, dnsScope, currentProfile?.uid],
   )
 
   const onSave = useLockFn(async () => {
@@ -520,12 +525,12 @@ export function DnsViewer({ ref }: { ref?: Ref<DialogRef> }) {
         config = parsedConfig as Record<string, any>
       }
 
-      await mutate(() => saveDnsConfig(config), {
+      await mutate(() => saveDnsConfig(config, editorTargetRef.current), {
         id: 'save-dns-config',
         errorNotice: false,
       })
 
-      const validation = await validateDnsConfig()
+      const validation = await validateDnsConfig(editorTargetRef.current)
 
       if (validation.status !== 'valid') {
         const errorMsg =
@@ -561,13 +566,11 @@ export function DnsViewer({ ref }: { ref?: Ref<DialogRef> }) {
         return
       }
 
-      if (dnsEnabled) {
-        await mutate(() => applyDnsConfig(true), {
-          id: 'apply-dns-config',
-          errorNotice: false,
-        })
-        mutateClash()
-      }
+      await mutate(() => applyDnsConfig(true), {
+        id: 'apply-dns-config',
+        errorNotice: false,
+      })
+      mutateClash()
 
       setOpen(false)
       showNotice.success('settings.modals.dns.messages.saved')
@@ -653,7 +656,14 @@ export function DnsViewer({ ref }: { ref?: Ref<DialogRef> }) {
       onOk={onSave}
     >
       <Alert severity="info" sx={{ mb: 2 }}>
-        {t('settings.modals.dns.dialog.profileScope')}
+        {t(
+          editorTargetRef.current.scope === 'global'
+            ? 'settings.modals.dns.dialog.globalScope'
+            : 'settings.modals.dns.dialog.profileScope',
+        )}
+        {editorTargetRef.current.scope === 'profile' && currentProfile?.name
+          ? ` ${currentProfile.name}`
+          : ''}
       </Alert>
       <Typography
         variant="body2"

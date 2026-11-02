@@ -20,7 +20,12 @@ import { closeAllConnections } from 'tauri-plugin-mihomo-api'
 import { BaseDialog, DialogRef } from '@/components/base'
 import { useClash, useClashInfo } from '@/hooks/use-clash'
 import { useVerge } from '@/hooks/use-verge'
-import { changeClashCore, restartCore, upgradeClashCore } from '@/services/cmds'
+import {
+  changeClashCore,
+  restartCore,
+  upgradeClashCore,
+  installBundledClashCore,
+} from '@/services/cmds'
 import { mutate } from '@/services/mutate'
 import { showNotice } from '@/services/notice-service'
 
@@ -48,6 +53,7 @@ export function ClashCoreViewer({ ref }: { ref?: Ref<DialogRef> }) {
   const [upgrading, setUpgrading] = useState(false)
   const [restarting, setRestarting] = useState(false)
   const [changingCore, setChangingCore] = useState<string | null>(null)
+  const [installing, setInstalling] = useState(false)
 
   useImperativeHandle(ref, () => ({
     open: () => setOpen(true),
@@ -124,6 +130,21 @@ export function ClashCoreViewer({ ref }: { ref?: Ref<DialogRef> }) {
     }
   })
 
+  const onUseBundled = useLockFn(async () => {
+    setInstalling(true)
+    try {
+      await mutate(() => installBundledClashCore(), {
+        id: 'use-bundled-clash-core',
+      })
+      invalidateClashConfig()
+      mutateVersion()
+    } catch {
+      // The command funnel owns the error notice.
+    } finally {
+      setInstalling(false)
+    }
+  })
+
   return (
     <BaseDialog
       open={open}
@@ -132,12 +153,22 @@ export function ClashCoreViewer({ ref }: { ref?: Ref<DialogRef> }) {
           {t('settings.sections.clash.form.fields.clashCore')}
           <Box>
             <Button
+              variant="outlined"
+              size="small"
+              loading={installing}
+              disabled={upgrading || restarting || changingCore !== null}
+              sx={{ mr: 1 }}
+              onClick={onUseBundled}
+            >
+              {t('settings.modals.clashCore.useBundled')}
+            </Button>
+            <Button
               variant="contained"
               size="small"
               startIcon={<SwitchAccessShortcutRounded />}
               loadingPosition="start"
               loading={upgrading}
-              disabled={restarting || changingCore !== null}
+              disabled={installing || restarting || changingCore !== null}
               sx={{ marginRight: '8px' }}
               onClick={onUpgrade}
             >
@@ -149,7 +180,7 @@ export function ClashCoreViewer({ ref }: { ref?: Ref<DialogRef> }) {
               startIcon={<RestartAltRounded />}
               loadingPosition="start"
               loading={restarting}
-              disabled={upgrading}
+              disabled={installing || upgrading}
               onClick={onRestart}
             >
               {t('shared.actions.restart')}
@@ -176,7 +207,9 @@ export function ClashCoreViewer({ ref }: { ref?: Ref<DialogRef> }) {
             key={each.core}
             selected={each.core === clash_core}
             onClick={() => onCoreChange(each.core)}
-            disabled={changingCore !== null || restarting || upgrading}
+            disabled={
+              installing || changingCore !== null || restarting || upgrading
+            }
           >
             <ListItemText primary={each.name} secondary={`/${each.core}`} />
             {changingCore === each.core ? (

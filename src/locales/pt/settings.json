@@ -305,7 +305,8 @@
       "variants": {
         "release": "Versão Release",
         "alpha": "Versão Alpha"
-      }
+      },
+      "useBundled": "Usar núcleo integrado"
     },
     "liteMode": {
       "title": "Configurações do Modo Leve",
@@ -511,8 +512,11 @@
     "dns": {
       "dialog": {
         "title": "Sobrescrever DNS",
-        "profileScope": "A opção de sobrescrever DNS é salva separadamente para cada perfil e se aplica somente a esse perfil.",
-        "warning": "Se você não está familiarizado com estas configurações, não as modifique e mantenha a Sobrescrita de DNS desativada"
+        "profileScope": "Salva o DNS por assinatura. Os aplicativos usam o DNS da assinatura selecionada.",
+        "warning": "Se você não está familiarizado com estas configurações, não as modifique e mantenha a Sobrescrita de DNS desativada",
+        "global": "Global",
+        "followProfile": "Seguir assinatura",
+        "globalScope": "Uma configuração DNS para todos os aplicativos e assinaturas, mantida ao trocar de assinatura."
       },
       "protection": {
         "title": "Ativar Sobrescrita de DNS?",

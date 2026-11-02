@@ -19,6 +19,54 @@ pub(crate) const DNS_SCRIPT_TIMEOUT: Duration = Duration::from_secs(5);
 
 static DNS_LOCK: Mutex<()> = Mutex::const_new(());
 
+pub async fn system_dns_upstreams() -> anyhow::Result<Vec<String>> {
+    let output = tokio::process::Command::new("/usr/sbin/scutil")
+        .arg("--dns")
+        .output()
+        .await?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut servers = Vec::new();
+    for line in text.lines().filter(|line| line.trim_start().starts_with("nameserver[")) {
+        if let Some((_, address)) = line.split_once(" : ") {
+            let address = address.trim();
+            if address.parse::<std::net::IpAddr>().is_ok() && !servers.iter().any(|old| old == address) {
+                servers.push(address.to_owned());
+            }
+        }
+    }
+    if servers == [PLACEHOLDER_DNS] {
+        use tokio::io::AsyncWriteExt as _;
+        let mut child = tokio::process::Command::new("/usr/sbin/scutil")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()?;
+        if let Some(mut input) = child.stdin.take() {
+            input.write_all(b"show State:/Network/Global/IPv4\nquit\n").await?;
+        }
+        let output = child.wait_with_output().await?;
+        let text = String::from_utf8_lossy(&output.stdout);
+        if let Some(service) = text
+            .lines()
+            .find_map(|line| line.trim().strip_prefix("PrimaryService : "))
+        {
+            let dir = restore_dns_state_dir(&crate::utils::dirs::app_resources_dir()?, dns_state_dir()?);
+            let backup = dir.join(DNS_BACKUP_DIR).join(service.trim());
+            if backup.exists() {
+                let original = tokio::fs::read_to_string(backup).await?;
+                let original: Vec<_> = original
+                    .lines()
+                    .filter(|line| line.parse::<std::net::IpAddr>().is_ok())
+                    .map(ToOwned::to_owned)
+                    .collect();
+                if !original.is_empty() {
+                    servers = original;
+                }
+            }
+        }
+    }
+    Ok(servers)
+}
+
 fn dns_state_dir() -> anyhow::Result<PathBuf> {
     // The DNS scripts persist their backups relative to their working directory.
     let dir = crate::utils::dirs::app_home_dir()?;

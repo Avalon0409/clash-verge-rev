@@ -37,13 +37,17 @@ const SettingClash = ({ onError }: Props) => {
   const { t } = useTranslation()
 
   const { clash, version, mutateClash, patchClash } = useClash()
-  const { verge, mutateVerge } = useVerge()
+  const { verge, mutateVerge, patchVerge } = useVerge()
   const { current: currentProfile } = useProfiles()
-  const dnsEnabled = currentProfile
-    ? (verge?.profile_dns_settings?.[currentProfile.uid]?.enabled ??
-      verge?.enable_dns_settings ??
-      false)
-    : false
+  const dnsScope = verge?.dns_override_scope ?? 'profile'
+  const dnsEnabled =
+    dnsScope === 'global'
+      ? (verge?.global_dns_settings ?? false)
+      : currentProfile
+        ? (verge?.profile_dns_settings?.[currentProfile.uid]?.enabled ??
+          verge?.enable_dns_settings ??
+          false)
+        : false
   const displayedMixedPort = useDisplayedMixedPort()
   const [, setClashLog] = useClashLog()
 
@@ -189,12 +193,42 @@ const SettingClash = ({ onError }: Props) => {
               onClick={() => dnsRef.current?.open()}
             />
             <TooltipIcon
-              title={t('settings.modals.dns.dialog.profileScope')}
+              title={t(
+                dnsScope === 'global'
+                  ? 'settings.modals.dns.dialog.globalScope'
+                  : 'settings.modals.dns.dialog.profileScope',
+              )}
               sx={{ opacity: '0.7' }}
             />
           </>
         }
       >
+        <Select
+          size="small"
+          value={dnsScope}
+          disabled={dnsUpdating || dnsConfirmation !== null}
+          sx={{ mr: 1 }}
+          onChange={async (event) => {
+            setDnsUpdating(true)
+            try {
+              await patchVerge({
+                dns_override_scope: event.target.value as 'global' | 'profile',
+              })
+              mutateClash()
+            } catch (error: any) {
+              onError(error)
+            } finally {
+              setDnsUpdating(false)
+            }
+          }}
+        >
+          <MenuItem value="global">
+            {t('settings.modals.dns.dialog.global')}
+          </MenuItem>
+          <MenuItem value="profile">
+            {t('settings.modals.dns.dialog.followProfile')}
+          </MenuItem>
+        </Select>
         <Switch
           edge="end"
           checked={dnsEnabled}

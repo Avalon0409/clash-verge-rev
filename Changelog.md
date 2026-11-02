@@ -1,3 +1,13 @@
+## v2.5.10
+
+<details>
+<summary><strong> ✨ 新增功能 </strong></summary>
+
+- Add global and per-subscription DNS overrides that follow each application's selected subscription.
+- Add a button to load the bundled core after upgrading application routing features.
+
+</details>
+
 ## v2.5.9
 
 <details>

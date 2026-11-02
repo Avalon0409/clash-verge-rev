@@ -305,7 +305,8 @@
       "variants": {
         "release": "正式版",
         "alpha": "アルファ版"
-      }
+      },
+      "useBundled": "内蔵コアを使用"
     },
     "liteMode": {
       "title": "軽量モード設定",
@@ -511,8 +512,11 @@
     "dns": {
       "dialog": {
         "title": "DNS上書き",
-        "profileScope": "DNS 上書きスイッチの状態はプロファイルごとに保存され、そのプロファイルにのみ適用されます。",
-        "warning": "ここの設定がわからない場合は、変更しないでください。DNS上書きを無効にしたままにしてください。"
+        "profileScope": "サブスクリプションごとに DNS 設定を保存します。アプリは選択したサブスクリプションの DNS を使います。",
+        "warning": "ここの設定がわからない場合は、変更しないでください。DNS上書きを無効にしたままにしてください。",
+        "global": "グローバル",
+        "followProfile": "サブスクリプションに従う",
+        "globalScope": "すべてのアプリとサブスクリプションで同じ DNS 設定を使います。切り替えても設定は維持されます。"
       },
       "protection": {
         "title": "Enable DNS Overwrite?",

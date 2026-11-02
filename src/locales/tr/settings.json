@@ -305,7 +305,8 @@
       "variants": {
         "release": "Kararlı Sürüm",
         "alpha": "Alfa Sürümü"
-      }
+      },
+      "useBundled": "Birlikte gelen çekirdeği kullan"
     },
     "liteMode": {
       "title": "Hafif Mod Ayarları",
@@ -511,8 +512,11 @@
     "dns": {
       "dialog": {
         "title": "DNS Üzerine Yazma",
-        "profileScope": "DNS geçersiz kılma anahtarının durumu her profil için ayrı kaydedilir ve yalnızca o profile uygulanır.",
-        "warning": "Bu ayarlarla ilgili bilginiz yoksa, lütfen bunları değiştirmeyin ve DNS Üzerine Yazma'yı devre dışı tutun"
+        "profileScope": "DNS ayarları her abonelik için ayrı kaydedilir. Uygulamalar seçilen aboneliğin DNS ayarlarını kullanır.",
+        "warning": "Bu ayarlarla ilgili bilginiz yoksa, lütfen bunları değiştirmeyin ve DNS Üzerine Yazma'yı devre dışı tutun",
+        "global": "Genel",
+        "followProfile": "Aboneliği izle",
+        "globalScope": "Tüm uygulama ve aboneliklere aynı DNS ayarları uygulanır; abonelik değişince korunur."
       },
       "protection": {
         "title": "DNS Üzerine Yazma etkinleştirilsin mi?",

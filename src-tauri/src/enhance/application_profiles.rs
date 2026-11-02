@@ -15,6 +15,47 @@ pub fn root_rules(uid: &str) -> std::string::String {
     alias(uid, "__root_rules")
 }
 
+#[cfg(target_os = "macos")]
+fn replace_system_servers(dns: &mut Value, servers: &[Value]) {
+    match dns {
+        Value::Sequence(values) => {
+            let old = std::mem::take(values);
+            for mut value in old {
+                if value.as_str() == Some("system") {
+                    values.extend_from_slice(servers);
+                } else {
+                    replace_system_servers(&mut value, servers);
+                    values.push(value);
+                }
+            }
+        }
+        Value::Mapping(map) => {
+            for value in map.values_mut() {
+                replace_system_servers(value, servers);
+            }
+        }
+        Value::String(value) if value == "system" => *dns = Value::Sequence(servers.to_vec()),
+        _ => {}
+    }
+}
+
+#[cfg(target_os = "macos")]
+pub fn preserve_system_dns(dns: &mut Mapping, servers: &[Value]) {
+    for key in [
+        "nameserver",
+        "default-nameserver",
+        "fallback",
+        "proxy-server-nameserver",
+        "direct-nameserver",
+        "nameserver-policy",
+        "proxy-server-nameserver-policy",
+    ] {
+        if let Some(value) = dns.get_mut(key) {
+            replace_system_servers(value, servers);
+        }
+    }
+}
+
 #[derive(Serialize)]
 pub struct OutboundOption {
     pub name: std::string::String,
@@ -108,6 +149,77 @@ fn rename_group_members(
     }
 }
 
+fn rename_dns_nameservers(value: &mut Value, proxies: &HashMap<std::string::String, std::string::String>) {
+    if let Some(servers) = value.as_sequence_mut() {
+        for server in servers {
+            rename_dns_nameservers(server, proxies);
+        }
+    } else if let Some(value_str) = value.as_str()
+        && let Some((address, fragment)) = value_str.split_once('#')
+    {
+        let fragments: Vec<_> = fragment
+            .split('&')
+            .map(|part| proxies.get(part).map_or_else(|| part.to_owned(), Clone::clone))
+            .collect();
+        *value = Value::from(format!("{address}#{}", fragments.join("&")));
+    }
+}
+
+pub fn namespace_dns(
+    dns: &mut Mapping,
+    proxies: &HashMap<std::string::String, std::string::String>,
+    rule_providers: &HashMap<std::string::String, std::string::String>,
+) {
+    for key in [
+        "default-nameserver",
+        "nameserver",
+        "fallback",
+        "proxy-server-nameserver",
+        "direct-nameserver",
+    ] {
+        if let Some(servers) = dns.get_mut(key) {
+            rename_dns_nameservers(servers, proxies);
+        }
+    }
+    for key in ["nameserver-policy", "proxy-server-nameserver-policy"] {
+        if let Some(policies) = dns.get_mut(key).and_then(Value::as_mapping_mut) {
+            let old = std::mem::take(policies);
+            for (key, mut value) in old {
+                rename_dns_nameservers(&mut value, proxies);
+                if let Some(names) = key.as_str().and_then(|key| key.strip_prefix("rule-set:")) {
+                    for name in names.split(',').map(str::trim) {
+                        let name = rule_providers.get(name).map_or(name, std::string::String::as_str);
+                        policies.insert(Value::from(format!("rule-set:{name}")), value.clone());
+                    }
+                } else {
+                    policies.insert(key, value);
+                }
+            }
+        }
+    }
+}
+
+fn import_dns(
+    target: &mut Mapping,
+    uid: &str,
+    source: &Mapping,
+    proxies: &HashMap<std::string::String, std::string::String>,
+    rule_providers: &HashMap<std::string::String, std::string::String>,
+) -> Result<()> {
+    if let Some(mut dns) = source.get("dns").and_then(Value::as_mapping).cloned() {
+        namespace_dns(&mut dns, proxies, rule_providers);
+        dns.insert("enhanced-mode".into(), "redir-host".into());
+        dns.remove("listen");
+        target
+            .entry("application-dns".into())
+            .or_insert_with(|| Value::Mapping(Mapping::new()))
+            .as_mapping_mut()
+            .ok_or_else(|| anyhow::anyhow!("invalid application DNS mapping"))?
+            .insert(Value::from(root_rules(uid)), Value::Mapping(dns));
+    }
+    Ok(())
+}
+
 pub fn import_profile(target: &mut Mapping, uid: &str, source: Mapping) -> Result<()> {
     let mut proxies = HashMap::new();
     for key in ["proxies", "proxy-groups"] {
@@ -136,6 +248,7 @@ pub fn import_profile(target: &mut Mapping, uid: &str, source: Mapping) -> Resul
         .filter_map(Value::as_str)
         .map(|name| (name.to_owned(), alias(uid, name)))
         .collect();
+    import_dns(target, uid, &source, &proxies, &rule_providers)?;
     let subs: HashMap<_, _> = source
         .get("sub-rules")
         .and_then(Value::as_mapping)
@@ -341,6 +454,26 @@ mod tests {
         );
         assert_eq!(rules[3], format!("MATCH,{}", alias("B", "Main")));
         assert!(global["rule-providers"].get(alias("B", "Same")).is_some());
+        Ok(())
+    }
+
+    #[test]
+    fn subscription_dns_keeps_its_proxy_and_policy_namespace() -> Result<()> {
+        let mut global = Mapping::new();
+        let source: Mapping = serde_yaml_ng::from_str(
+            "proxies: [{name: Exit, type: http, server: 127.0.0.1, port: 1002}]\nproxy-groups: []\nrule-providers: {Company: {type: inline, behavior: domain, payload: [example.test]}}\ndns: {enable: true, nameserver: ['https://1.1.1.1/dns-query#Exit&ecs=1.2.3.4'], nameserver-policy: {'rule-set:Company': ['https://8.8.8.8/dns-query#Exit']}}",
+        )?;
+        import_profile(&mut global, "one", source)?;
+        let dns = &global["application-dns"][root_rules("one")];
+        assert_eq!(
+            dns["nameserver"][0],
+            format!("https://1.1.1.1/dns-query#{}&ecs=1.2.3.4", alias("one", "Exit"))
+        );
+        assert_eq!(
+            dns["nameserver-policy"][format!("rule-set:{}", alias("one", "Company"))][0],
+            format!("https://8.8.8.8/dns-query#{}", alias("one", "Exit"))
+        );
+        assert_eq!(dns["enhanced-mode"], "redir-host");
         Ok(())
     }
 }

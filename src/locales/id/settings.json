@@ -305,7 +305,8 @@
       "variants": {
         "release": "Versi Rilis",
         "alpha": "Versi Alpha"
-      }
+      },
+      "useBundled": "Gunakan inti bawaan"
     },
     "liteMode": {
       "title": "LightWeight Mode Settings",
@@ -511,8 +512,11 @@
     "dns": {
       "dialog": {
         "title": "DNS Overwrite",
-        "profileScope": "Status sakelar penimpaan DNS disimpan secara terpisah untuk setiap profil dan hanya berlaku untuk profil tersebut.",
-        "warning": "If you are not familiar with these settings, please do not modify them and keep DNS Overwrite disabled"
+        "profileScope": "Simpan DNS terpisah untuk setiap langganan. Aplikasi memakai DNS langganan yang dipilih.",
+        "warning": "If you are not familiar with these settings, please do not modify them and keep DNS Overwrite disabled",
+        "global": "Global",
+        "followProfile": "Ikuti langganan",
+        "globalScope": "Satu konfigurasi DNS berlaku untuk semua aplikasi dan langganan, tetap berlaku saat berganti langganan."
       },
       "protection": {
         "title": "Enable DNS Overwrite?",

@@ -305,7 +305,8 @@
       "variants": {
         "release": "Release Version",
         "alpha": "Alpha Version"
-      }
+      },
+      "useBundled": "Use bundled core"
     },
     "liteMode": {
       "title": "LightWeight Mode Settings",
@@ -511,8 +512,11 @@
     "dns": {
       "dialog": {
         "title": "DNS Overwrite",
-        "profileScope": "The DNS override switch is saved separately for each profile and applies only to that profile.",
-        "warning": "If you are not familiar with these settings, please do not modify them and keep DNS Overwrite disabled"
+        "profileScope": "Save DNS settings separately for each subscription. Applications use the DNS of their selected subscription.",
+        "warning": "If you are not familiar with these settings, please do not modify them and keep DNS Overwrite disabled",
+        "global": "Global",
+        "followProfile": "Follow subscription",
+        "globalScope": "Apply one DNS configuration to all applications and subscriptions. Switching subscriptions keeps these settings."
       },
       "protection": {
         "title": "Enable DNS Overwrite?",

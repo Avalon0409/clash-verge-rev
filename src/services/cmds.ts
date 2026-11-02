@@ -195,16 +195,24 @@ export async function setDnsOverride(
   >('set_dns_override', { profileUid, enabled, confirmation })
 }
 
-export async function getDnsConfigContent() {
-  return invoke<string | null>('get_dns_config_content')
+export type DnsConfigTarget = {
+  profileUid?: string
+  scope: 'global' | 'profile'
 }
 
-export async function saveDnsConfig(dnsConfig: Record<string, unknown>) {
-  return invoke<void>('save_dns_config', { dnsConfig })
+export async function getDnsConfigContent(target?: DnsConfigTarget) {
+  return invoke<string | null>('get_dns_config_content', target)
 }
 
-export async function validateDnsConfig() {
-  return invoke<ValidationOutcome>('validate_dns_config')
+export async function saveDnsConfig(
+  dnsConfig: Record<string, unknown>,
+  target?: DnsConfigTarget,
+) {
+  return invoke<void>('save_dns_config', { dnsConfig, ...target })
+}
+
+export async function validateDnsConfig(target?: DnsConfigTarget) {
+  return invoke<ValidationOutcome>('validate_dns_config', target)
 }
 
 export async function applyDnsConfig(apply: boolean) {
@@ -281,6 +289,10 @@ export async function changeClashCore(clashCore: string) {
 
 export async function restartCore() {
   return invoke<void>('restart_core')
+}
+
+export async function installBundledClashCore() {
+  return invoke<void>('use_bundled_clash_core')
 }
 
 export interface CoreUpgradeReport {

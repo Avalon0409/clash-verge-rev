@@ -10,6 +10,64 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use super::{Config, IVerge};
 use crate::core::handle::Handle;
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DnsOverrideScope {
+    Global,
+    #[default]
+    Profile,
+}
+
+pub fn dns_config_path(
+    app_dir: &std::path::Path,
+    scope: DnsOverrideScope,
+    profile_uid: &str,
+) -> Result<std::path::PathBuf> {
+    if scope == DnsOverrideScope::Global {
+        return Ok(app_dir.join(crate::constants::files::DNS_CONFIG));
+    }
+    anyhow::ensure!(!profile_uid.is_empty(), "Select a subscription for DNS settings");
+    use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+    Ok(app_dir
+        .join("profiles")
+        .join(format!("dns-{}.yaml", URL_SAFE_NO_PAD.encode(profile_uid))))
+}
+
+pub async fn migrate_profile_dns_configs() -> Result<()> {
+    let app_dir = crate::utils::dirs::app_home_dir()?;
+    let legacy_path = app_dir.join(crate::constants::files::DNS_CONFIG);
+    if !legacy_path.exists() {
+        return Ok(());
+    }
+    let content = tokio::fs::read(&legacy_path).await?;
+    let profiles = Config::profiles().await.data_arc();
+    let verge = Config::verge().await.latest_arc();
+    let ids: Vec<_> = profiles
+        .items
+        .as_ref()
+        .into_iter()
+        .flatten()
+        .filter(|item| matches!(item.itype.as_deref(), Some("remote" | "local")))
+        .filter_map(|item| item.uid.as_ref())
+        .filter(|uid| {
+            verge.profile_dns_settings.get(*uid).map_or_else(
+                || verge.enable_dns_settings.unwrap_or(false),
+                |settings| settings.enabled,
+            )
+        })
+        .cloned()
+        .collect();
+    drop(verge);
+    drop(profiles);
+    for uid in ids {
+        let path = dns_config_path(&app_dir, DnsOverrideScope::Profile, &uid)?;
+        if !path.exists() {
+            tokio::fs::write(path, &content).await?;
+        }
+    }
+    Ok(())
+}
+
 static PENDING_DNS_OVERRIDE_NOTICE: AtomicBool = AtomicBool::new(false);
 
 pub(crate) fn take_dns_override_notice() -> bool {
@@ -61,6 +119,7 @@ pub(crate) struct DnsOverrideState {
     pub enabled: bool,
     requested: bool,
     confirmation: Option<String>,
+    pub related: Vec<Self>,
 }
 
 impl DnsOverrideState {
@@ -72,6 +131,7 @@ impl DnsOverrideState {
             enabled,
             requested,
             confirmation,
+            related: Vec::new(),
         }
     }
 
@@ -114,7 +174,17 @@ pub struct ProfileDnsSettings {
 }
 
 impl IVerge {
+    pub fn dns_scope(&self) -> DnsOverrideScope {
+        self.dns_override_scope.unwrap_or_default()
+    }
+
     pub(crate) fn dns_settings_for(&self, profile_uid: &str) -> ProfileDnsSettings {
+        if self.dns_scope() == DnsOverrideScope::Global {
+            return ProfileDnsSettings {
+                enabled: self.global_dns_settings.unwrap_or(false),
+                confirmation: None,
+            };
+        }
         self.profile_dns_settings
             .get(profile_uid)
             .cloned()
@@ -128,18 +198,28 @@ impl IVerge {
 impl Config {
     pub(crate) async fn sync_dns_override() -> Result<()> {
         let _config_write = Self::lock_config_write().await;
+        if Self::verge().await.latest_arc().dns_scope() == DnsOverrideScope::Global {
+            return Ok(());
+        }
         let state = Self::runtime().await.data_arc().dns_override.clone();
         let Some(state) = state else {
             return Ok(());
         };
         let verge = Self::verge().await;
         let transaction = DraftTransaction::begin(vec![&verge])?;
-        if !verge.edit_draft(|draft| state.apply_to(draft)) {
+        let states: Vec<_> = std::iter::once(&state).chain(state.related.iter()).collect();
+        if !verge.edit_draft(|draft| {
+            let mut changed = false;
+            for state in &states {
+                changed |= state.apply_to(draft);
+            }
+            changed
+        }) {
             return Ok(());
         }
         // The runtime is already committed; a disk failure cannot undo its effective settings.
         transaction.commit();
-        if state.requested && !state.enabled {
+        if states.iter().any(|state| state.requested && !state.enabled) {
             PENDING_DNS_OVERRIDE_NOTICE.store(true, Ordering::Relaxed);
             Handle::notice(NoticeStatus::DnsOverrideAutoDisabled, "");
         }
@@ -159,6 +239,37 @@ mod tests {
 
     fn mapping(yaml: &str) -> Mapping {
         serde_yaml_ng::from_str(yaml).expect("valid fixture")
+    }
+
+    #[test]
+    fn global_scope_keeps_profile_preferences_and_profile_paths_isolated() -> Result<()> {
+        let mut config = IVerge {
+            dns_override_scope: Some(super::DnsOverrideScope::Global),
+            global_dns_settings: Some(true),
+            profile_dns_settings: [(
+                "one".into(),
+                ProfileDnsSettings {
+                    enabled: false,
+                    confirmation: None,
+                },
+            )]
+            .into(),
+            ..IVerge::default()
+        };
+        assert!(config.dns_settings_for("one").enabled);
+        assert!(config.dns_settings_for("new").enabled);
+        config.dns_override_scope = Some(super::DnsOverrideScope::Profile);
+        assert!(!config.dns_settings_for("one").enabled);
+        let dir = std::path::Path::new("/config");
+        assert_ne!(
+            super::dns_config_path(dir, super::DnsOverrideScope::Profile, "one")?,
+            super::dns_config_path(dir, super::DnsOverrideScope::Profile, "two")?
+        );
+        assert_eq!(
+            super::dns_config_path(dir, super::DnsOverrideScope::Global, "one")?,
+            super::dns_config_path(dir, super::DnsOverrideScope::Global, "two")?
+        );
+        Ok(())
     }
 
     #[test]

@@ -305,7 +305,8 @@
       "variants": {
         "release": "Stabile Version",
         "alpha": "Alpha-Version"
-      }
+      },
+      "useBundled": "Mitgelieferten Kern verwenden"
     },
     "liteMode": {
       "title": "Einstellungen für den Leichtgewichtigen Modus",
@@ -511,8 +512,11 @@
     "dns": {
       "dialog": {
         "title": "DNS-Überschreibung",
-        "profileScope": "Der DNS-Überschreibungsschalter wird für jedes Profil separat gespeichert und gilt nur für dieses Profil.",
-        "warning": "Wenn Sie sich nicht mit diesen Einstellungen auskennen, ändern Sie sie nicht und lassen Sie die DNS-Überschreibung deaktiviert."
+        "profileScope": "DNS-Einstellungen werden je Abonnement gespeichert. Apps nutzen den DNS ihres gewählten Abonnements.",
+        "warning": "Wenn Sie sich nicht mit diesen Einstellungen auskennen, ändern Sie sie nicht und lassen Sie die DNS-Überschreibung deaktiviert.",
+        "global": "Global",
+        "followProfile": "Abonnement folgen",
+        "globalScope": "Eine DNS-Konfiguration gilt für alle Apps und Abonnements und bleibt beim Wechsel erhalten."
       },
       "protection": {
         "title": "DNS-Überschreibung aktivieren?",

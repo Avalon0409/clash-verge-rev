@@ -86,6 +86,12 @@ pub struct IVerge {
     /// Initial DNS override preference for profiles without a saved setting.
     pub enable_dns_settings: Option<bool>,
 
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dns_override_scope: Option<super::dns::DnsOverrideScope>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub global_dns_settings: Option<bool>,
+
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub profile_dns_settings: std::collections::BTreeMap<String, super::dns::ProfileDnsSettings>,
 
@@ -495,6 +501,8 @@ impl IVerge {
         patch!(enable_auto_light_weight_mode);
         patch!(auto_light_weight_minutes);
         patch!(enable_dns_settings);
+        patch!(dns_override_scope);
+        patch!(global_dns_settings);
         patch!(home_cards);
         patch!(enable_external_controller);
     }

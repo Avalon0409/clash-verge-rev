@@ -43,6 +43,7 @@ struct ConfigValues {
     http_enabled: bool,
     enable_dns_settings: bool,
     dns_override_confirmation: Option<String>,
+    dns_override_scope: crate::config::dns::DnsOverrideScope,
     enable_external_controller: bool,
     #[cfg(not(target_os = "windows"))]
     redir_enabled: bool,
@@ -128,6 +129,7 @@ async fn get_config_values(profile_uid: &str) -> ConfigValues {
     } = **verge_arc;
     let enable_external_controller = enable_external_controller.unwrap_or(false);
     let dns_settings = verge_arc.dns_settings_for(profile_uid);
+    let dns_override_scope = verge_arc.dns_scope();
     let dns_override_confirmation = dns_settings.confirmation;
 
     let (clash_core, enable_tun, enable_builtin, socks_enabled, http_enabled, enable_dns_settings) = (
@@ -157,6 +159,7 @@ async fn get_config_values(profile_uid: &str) -> ConfigValues {
         http_enabled,
         enable_dns_settings,
         dns_override_confirmation,
+        dns_override_scope,
         enable_external_controller,
         #[cfg(not(target_os = "windows"))]
         redir_enabled,
@@ -858,9 +861,20 @@ fn merge_dns_config(mut config: Mapping, mut dns_config: Mapping) -> (Mapping, M
 }
 
 /// Returns the merged config and the non-empty fields owned by the DNS page.
-async fn apply_dns_settings(config: Mapping, enable_dns_settings: bool) -> (Mapping, Mapping) {
+async fn apply_dns_settings(
+    config: Mapping,
+    enable_dns_settings: bool,
+    scope: crate::config::dns::DnsOverrideScope,
+    profile_uid: &str,
+) -> (Mapping, Mapping) {
     if enable_dns_settings && let Ok(app_dir) = dirs::app_home_dir() {
-        let dns_path = app_dir.join(constants::files::DNS_CONFIG);
+        let Ok(mut dns_path) = crate::config::dns::dns_config_path(&app_dir, scope, profile_uid) else {
+            return (config, Mapping::new());
+        };
+        // Existing enabled subscriptions used the shared file before scoped files existed.
+        if scope == crate::config::dns::DnsOverrideScope::Profile && !dns_path.exists() {
+            dns_path = app_dir.join(constants::files::DNS_CONFIG);
+        }
 
         if dns_path.exists()
             && let Ok(dns_yaml) = fs::read_to_string(&dns_path).await
@@ -889,6 +903,7 @@ async fn enhance_profile(
         http_enabled,
         enable_dns_settings,
         dns_override_confirmation,
+        dns_override_scope,
         enable_external_controller,
         #[cfg(not(target_os = "windows"))]
         redir_enabled,
@@ -899,7 +914,11 @@ async fn enhance_profile(
     let profile = collect_profile_items(profiles).await?;
     let dns_override = DnsOverrideState::new(
         profile_uid,
-        dns_override_source(profile_uid, &profile.config)?,
+        if dns_override_scope == crate::config::dns::DnsOverrideScope::Global {
+            None
+        } else {
+            dns_override_source(profile_uid, &profile.config)?
+        },
         enable_dns_settings,
         dns_override_confirmation,
     );
@@ -934,7 +953,7 @@ async fn enhance_profile(
 
     let config = apply_builtin_scripts(config, clash_core, enable_builtin);
     let config = use_tun(config, enable_tun);
-    let (config, dns_settings) = apply_dns_settings(config, enable_dns_settings).await;
+    let (config, dns_settings) = apply_dns_settings(config, enable_dns_settings, dns_override_scope, profile_uid).await;
 
     let authoritative = AuthoritativeFields::capture(&config, &gui_tun_keys, dns_settings);
 
@@ -978,21 +997,33 @@ async fn enhance_profile(
 pub async fn enhance(
     profiles: &IProfiles,
 ) -> Result<(Mapping, HashSet<String>, HashMap<String, ResultLog>, DnsOverrideState)> {
-    let (config, keys, logs, dns) = enhance_profile(profiles, true).await?;
+    let (config, keys, logs, mut dns) = enhance_profile(profiles, true).await?;
     let settings = Config::verge().await.latest_arc().application_proxy.clone();
     let global_source = config.clone();
     let mut config = config;
-    if let Some(settings) = settings.as_ref().filter(|settings| settings.enabled) {
-        let mut ids: HashSet<std::string::String> = settings
-            .applications
-            .iter()
-            .filter_map(|entry| entry.profile_uid.as_ref().map(ToString::to_string))
-            .collect();
-        ids.extend(
-            crate::core::application_processes::overrides()
-                .iter()
-                .filter_map(|entry| entry.profile_uid.as_ref().map(ToString::to_string)),
-        );
+    {
+        let mut ids = HashSet::new();
+        if let Some(settings) = settings.as_ref().filter(|settings| settings.enabled) {
+            ids.extend(
+                settings
+                    .applications
+                    .iter()
+                    .filter_map(|entry| entry.profile_uid.as_ref().map(ToString::to_string)),
+            );
+            ids.extend(
+                crate::core::application_processes::overrides()
+                    .iter()
+                    .filter_map(|entry| entry.profile_uid.as_ref().map(ToString::to_string)),
+            );
+        }
+        let dns_text = serde_yaml_ng::to_string(&config.get("dns"))?;
+        for item in profiles.items.as_ref().into_iter().flatten() {
+            if let Some(uid) = item.uid.as_ref()
+                && dns_text.contains(&application_profiles::prefix(uid))
+            {
+                ids.insert(uid.to_string());
+            }
+        }
         let mut ids: Vec<_> = ids.into_iter().collect();
         ids.sort();
         for uid in ids {
@@ -1011,12 +1042,43 @@ pub async fn enhance(
             let foreign = if profiles.current.as_deref() == Some(uid.as_str()) {
                 global_source.clone()
             } else {
-                enhance_profile(&selected, false).await?.0
+                let (config, _, _, state) = enhance_profile(&selected, false).await?;
+                dns.related.push(state);
+                config
             };
             application_profiles::import_profile(&mut config, &uid, foreign)?;
         }
     }
     let config = application_proxy::use_application_proxy(config, settings.as_ref())?;
+    let mut config = config;
+    if Config::verge().await.latest_arc().dns_scope() == crate::config::dns::DnsOverrideScope::Global {
+        config.remove("application-dns");
+    } else if settings.as_ref().is_some_and(|settings| settings.enabled) {
+        #[cfg(target_os = "macos")]
+        {
+            let servers: Vec<_> = crate::utils::resolve::dns::system_dns_upstreams()
+                .await?
+                .into_iter()
+                .map(Value::from)
+                .collect();
+            if !servers.is_empty() {
+                if let Some(dns) = config.get_mut("dns").and_then(Value::as_mapping_mut) {
+                    application_profiles::preserve_system_dns(dns, &servers);
+                }
+                if let Some(profiles) = config.get_mut("application-dns").and_then(Value::as_mapping_mut) {
+                    for dns in profiles.values_mut().filter_map(Value::as_mapping_mut) {
+                        application_profiles::preserve_system_dns(dns, &servers);
+                    }
+                }
+            }
+        }
+        // Shared OS DNS queries cannot identify the originating app; resolve at its connection boundary.
+        if let Some(dns) = config.get_mut("dns").and_then(Value::as_mapping_mut) {
+            dns.insert("enhanced-mode".into(), "fake-ip".into());
+            dns.insert("fake-ip-filter".into(), Value::Sequence(vec![]));
+            dns.insert("fake-ip-filter-mode".into(), "blacklist".into());
+        }
+    }
     Ok((use_sort(config), keys, logs, dns))
 }
 

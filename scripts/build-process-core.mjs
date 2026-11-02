@@ -64,6 +64,8 @@ try {
       './component/process',
       './adapter/outboundgroup',
       './adapter/provider',
+      './config',
+      './component/resolver',
     ],
     {
       cwd: work,
@@ -79,7 +81,7 @@ try {
       'with_gvisor',
       '-trimpath',
       '-ldflags',
-      `-s -w -X github.com/metacubex/mihomo/constant.Version=${source.version}-app-cross-subscription-1`,
+      `-s -w -X github.com/metacubex/mihomo/constant.Version=${source.version}-app-dns-1`,
       '-o',
       resolve(root, `src-tauri/sidecar/verge-mihomo-${host}`),
     ],

@@ -336,6 +336,231 @@
  }
  
  type searcher struct {
+--- /dev/null
++++ b/component/resolver/application_dns.go
+@@ -0,0 +1,56 @@
++package resolver
++
++import (
++	"context"
++	"sync/atomic"
++)
++
++type ApplicationResolvers struct {
++	Resolver
++	Proxy  Resolver
++	Direct Resolver
++}
++
++type applicationDNSContextKey struct{}
++
++var applicationDNS atomic.Pointer[map[string]ApplicationResolvers]
++
++func SetApplicationDNS(values map[string]ApplicationResolvers) {
++	old := applicationDNS.Swap(&values)
++	if old != nil {
++		for _, r := range *old {
++			go r.ResetConnection()
++		}
++	}
++}
++
++func ApplicationDNS(profile string) Resolver {
++	values := applicationDNS.Load()
++	if values == nil {
++		return nil
++	}
++	return (*values)[profile].Resolver
++}
++
++func WithApplicationDNS(ctx context.Context, profile string) context.Context {
++	if values := applicationDNS.Load(); values != nil {
++		if r, ok := (*values)[profile]; ok {
++			return context.WithValue(ctx, applicationDNSContextKey{}, r)
++		}
++	}
++	return ctx
++}
++
++func applicationResolver(ctx context.Context, r Resolver) Resolver {
++	selected, ok := ctx.Value(applicationDNSContextKey{}).(ApplicationResolvers)
++	if !ok || r == nil {
++		return r
++	}
++	if r == ProxyServerHostResolver && selected.Proxy != nil {
++		return selected.Proxy
++	}
++	if r == DirectHostResolver && selected.Direct != nil {
++		return selected.Direct
++	}
++	return r
++}
+--- a/component/resolver/resolver.go
++++ b/component/resolver/resolver.go
+@@ -57,6 +57,7 @@
+ 
+ // LookupIPv4WithResolver same as LookupIPv4, but with a resolver
+ func LookupIPv4WithResolver(ctx context.Context, host string, r Resolver) ([]netip.Addr, error) {
++	r = applicationResolver(ctx, r)
+ 	if node, ok := DefaultHosts.Search(host, false); ok {
+ 		if addrs := utils.Filter(node.IPs, func(ip netip.Addr) bool {
+ 			return ip.Is4()
+@@ -104,6 +105,7 @@
+ 
+ // LookupIPv6WithResolver same as LookupIPv6, but with a resolver
+ func LookupIPv6WithResolver(ctx context.Context, host string, r Resolver) ([]netip.Addr, error) {
++	r = applicationResolver(ctx, r)
+ 	if DisableIPv6 {
+ 		return nil, ErrIPv6Disabled
+ 	}
+@@ -153,6 +155,7 @@
+ 
+ // LookupIPWithResolver same as LookupIP, but with a resolver
+ func LookupIPWithResolver(ctx context.Context, host string, r Resolver) ([]netip.Addr, error) {
++	r = applicationResolver(ctx, r)
+ 	if node, ok := DefaultHosts.Search(host, false); ok {
+ 		return node.IPs, nil
+ 	}
+@@ -231,6 +234,11 @@
+ }
+ 
+ func ClearCache() {
++	if values := applicationDNS.Load(); values != nil {
++		for _, r := range *values {
++			go r.ClearCache()
++		}
++	}
+ 	if DefaultResolver != nil {
+ 		go DefaultResolver.ClearCache()
+ 	}
+@@ -238,6 +246,11 @@
+ }
+ 
+ func ResetConnection() {
++	if values := applicationDNS.Load(); values != nil {
++		for _, r := range *values {
++			go r.ResetConnection()
++		}
++	}
+ 	if DefaultResolver != nil {
+ 		go DefaultResolver.ResetConnection()
+ 	}
+--- a/config/config.go
++++ b/config/config.go
+@@ -193,24 +193,25 @@
+ 
+ // Config is mihomo config manager
+ type Config struct {
+-	General       *General
+-	Controller    *Controller
+-	Experimental  *Experimental
+-	IPTables      *IPTables
+-	NTP           *NTP
+-	DNS           *DNS
+-	Hosts         *trie.DomainTrie[resolver.HostValue]
+-	Profile       *Profile
+-	Rules         []C.Rule
+-	SubRules      map[string][]C.Rule
+-	Users         []auth.AuthUser
+-	Proxies       map[string]C.Proxy
+-	Listeners     map[string]C.InboundListener
+-	Providers     map[string]P.ProxyProvider
+-	RuleProviders map[string]P.RuleProvider
+-	Tunnels       []LC.Tunnel
+-	Sniffer       *sniffer.Config
+-	TLS           *TLS
++	General        *General
++	Controller     *Controller
++	Experimental   *Experimental
++	IPTables       *IPTables
++	NTP            *NTP
++	DNS            *DNS
++	ApplicationDNS map[string]*DNS
++	Hosts          *trie.DomainTrie[resolver.HostValue]
++	Profile        *Profile
++	Rules          []C.Rule
++	SubRules       map[string][]C.Rule
++	Users          []auth.AuthUser
++	Proxies        map[string]C.Proxy
++	Listeners      map[string]C.InboundListener
++	Providers      map[string]P.ProxyProvider
++	RuleProviders  map[string]P.RuleProvider
++	Tunnels        []LC.Tunnel
++	Sniffer        *sniffer.Config
++	TLS            *TLS
+ }
+ 
+ type RawCors struct {
+@@ -448,24 +449,25 @@
+ 	KeepAliveInterval             int                     `yaml:"keep-alive-interval" json:"keep-alive-interval"`
+ 	DisableKeepAlive              bool                    `yaml:"disable-keep-alive" json:"disable-keep-alive"`
+ 
+-	ProxyProvider map[string]map[string]any `yaml:"proxy-providers" json:"proxy-providers"`
+-	RuleProvider  map[string]map[string]any `yaml:"rule-providers" json:"rule-providers"`
+-	Proxy         []map[string]any          `yaml:"proxies" json:"proxies"`
+-	ProxyGroup    []map[string]any          `yaml:"proxy-groups" json:"proxy-groups"`
+-	Rule          []string                  `yaml:"rules" json:"rule"`
+-	SubRules      map[string][]string       `yaml:"sub-rules" json:"sub-rules"`
+-	Listeners     []map[string]any          `yaml:"listeners" json:"listeners"`
+-	Hosts         map[string]any            `yaml:"hosts" json:"hosts"`
+-	DNS           RawDNS                    `yaml:"dns" json:"dns"`
+-	NTP           RawNTP                    `yaml:"ntp" json:"ntp"`
+-	Tun           RawTun                    `yaml:"tun" json:"tun"`
+-	TuicServer    RawTuicServer             `yaml:"tuic-server" json:"tuic-server"`
+-	IPTables      RawIPTables               `yaml:"iptables" json:"iptables"`
+-	Experimental  RawExperimental           `yaml:"experimental" json:"experimental"`
+-	Profile       RawProfile                `yaml:"profile" json:"profile"`
+-	GeoXUrl       RawGeoXUrl                `yaml:"geox-url" json:"geox-url"`
+-	Sniffer       RawSniffer                `yaml:"sniffer" json:"sniffer"`
+-	TLS           RawTLS                    `yaml:"tls" json:"tls"`
++	ProxyProvider  map[string]map[string]any `yaml:"proxy-providers" json:"proxy-providers"`
++	RuleProvider   map[string]map[string]any `yaml:"rule-providers" json:"rule-providers"`
++	Proxy          []map[string]any          `yaml:"proxies" json:"proxies"`
++	ProxyGroup     []map[string]any          `yaml:"proxy-groups" json:"proxy-groups"`
++	Rule           []string                  `yaml:"rules" json:"rule"`
++	SubRules       map[string][]string       `yaml:"sub-rules" json:"sub-rules"`
++	Listeners      []map[string]any          `yaml:"listeners" json:"listeners"`
++	Hosts          map[string]any            `yaml:"hosts" json:"hosts"`
++	DNS            RawDNS                    `yaml:"dns" json:"dns"`
++	ApplicationDNS map[string]map[string]any `yaml:"application-dns" json:"application-dns"`
++	NTP            RawNTP                    `yaml:"ntp" json:"ntp"`
++	Tun            RawTun                    `yaml:"tun" json:"tun"`
++	TuicServer     RawTuicServer             `yaml:"tuic-server" json:"tuic-server"`
++	IPTables       RawIPTables               `yaml:"iptables" json:"iptables"`
++	Experimental   RawExperimental           `yaml:"experimental" json:"experimental"`
++	Profile        RawProfile                `yaml:"profile" json:"profile"`
++	GeoXUrl        RawGeoXUrl                `yaml:"geox-url" json:"geox-url"`
++	Sniffer        RawSniffer                `yaml:"sniffer" json:"sniffer"`
++	TLS            RawTLS                    `yaml:"tls" json:"tls"`
+ 
+ 	ClashForAndroid RawClashForAndroid `yaml:"clash-for-android" json:"clash-for-android"`
+ }
+@@ -720,6 +722,25 @@
+ 		return nil, err
+ 	}
+ 	config.DNS = dnsCfg
++	config.ApplicationDNS = make(map[string]*DNS, len(rawCfg.ApplicationDNS))
++	for name, values := range rawCfg.ApplicationDNS {
++		selected := DefaultRawConfig()
++		selected.IPv6 = rawCfg.IPv6
++		data, err := yaml.Marshal(values)
++		if err != nil {
++			return nil, err
++		}
++		if err = yaml.Unmarshal(data, &selected.DNS); err != nil {
++			return nil, err
++		}
++		selected.DNS.EnhancedMode = C.DNSMapping
++		selected.DNS.Listen = ""
++		dns, err := parseDNS(selected, ruleProviders)
++		if err != nil {
++			return nil, fmt.Errorf("application-dns[%s]: %w", name, err)
++		}
++		config.ApplicationDNS[name] = dns
++	}
+ 
+ 	err = parseTun(rawCfg.Tun, dnsCfg, config.General)
+ 	if err != nil {
 --- a/constant/metadata.go
 +++ b/constant/metadata.go
 @@ -1,11 +1,13 @@
@@ -352,7 +577,7 @@
  )
  
  // SOCKS address types as defined in RFC 1928 section 5.
-@@ -187,31 +189,42 @@
+@@ -187,31 +189,43 @@
  }
  
  // Metadata is used to store connection address
@@ -387,39 +612,40 @@
 -	SpecialRules string     `json:"specialRules"`
 -	RemoteDst    string     `json:"remoteDestination"`
 -	DSCP         uint8      `json:"dscp"`
-+	NetWork              NetWork           `json:"network"`
-+	Type                 Type              `json:"type"`
-+	SrcIP                netip.Addr        `json:"sourceIP"`
-+	DstIP                netip.Addr        `json:"destinationIP"`
-+	SrcGeoIP             []string          `json:"sourceGeoIP"`      // can be nil if never queried, empty slice if got no result
-+	DstGeoIP             []string          `json:"destinationGeoIP"` // can be nil if never queried, empty slice if got no result
-+	SrcIPASN             string            `json:"sourceIPASN"`
-+	DstIPASN             string            `json:"destinationIPASN"`
-+	SrcPort              uint16            `json:"sourcePort,string"`      // `,string` is used to compatible with old version json output
-+	DstPort              uint16            `json:"destinationPort,string"` // `,string` is used to compatible with old version json output
-+	InIP                 netip.Addr        `json:"inboundIP"`
-+	InPort               uint16            `json:"inboundPort,string"` // `,string` is used to compatible with old version json output
-+	InName               string            `json:"inboundName"`
-+	InUser               string            `json:"inboundUser"`
-+	RematchName          string            `json:"rematchName"`
-+	Host                 string            `json:"host"`
-+	DNSMode              DNSMode           `json:"dnsMode"`
-+	Uid                  uint32            `json:"uid"`
-+	Process              string            `json:"process"`
-+	ProcessPath          string            `json:"processPath"`
-+	ProcessID            uint32            `json:"processId"`
-+	ProcessStartTime     uint64            `json:"processStartTime"`
-+	ProcessAncestors     []ProcessIdentity `json:"processAncestors,omitempty"`
-+	ApplicationRuleProxy string            `json:"-"`
-+	ApplicationRuleSet   string            `json:"-"`
-+	SpecialProxy         string            `json:"specialProxy"`
-+	SpecialRules         string            `json:"specialRules"`
-+	RemoteDst            string            `json:"remoteDestination"`
-+	DSCP                 uint8             `json:"dscp"`
++	NetWork               NetWork           `json:"network"`
++	Type                  Type              `json:"type"`
++	SrcIP                 netip.Addr        `json:"sourceIP"`
++	DstIP                 netip.Addr        `json:"destinationIP"`
++	SrcGeoIP              []string          `json:"sourceGeoIP"`      // can be nil if never queried, empty slice if got no result
++	DstGeoIP              []string          `json:"destinationGeoIP"` // can be nil if never queried, empty slice if got no result
++	SrcIPASN              string            `json:"sourceIPASN"`
++	DstIPASN              string            `json:"destinationIPASN"`
++	SrcPort               uint16            `json:"sourcePort,string"`      // `,string` is used to compatible with old version json output
++	DstPort               uint16            `json:"destinationPort,string"` // `,string` is used to compatible with old version json output
++	InIP                  netip.Addr        `json:"inboundIP"`
++	InPort                uint16            `json:"inboundPort,string"` // `,string` is used to compatible with old version json output
++	InName                string            `json:"inboundName"`
++	InUser                string            `json:"inboundUser"`
++	RematchName           string            `json:"rematchName"`
++	Host                  string            `json:"host"`
++	DNSMode               DNSMode           `json:"dnsMode"`
++	Uid                   uint32            `json:"uid"`
++	Process               string            `json:"process"`
++	ProcessPath           string            `json:"processPath"`
++	ProcessID             uint32            `json:"processId"`
++	ProcessStartTime      uint64            `json:"processStartTime"`
++	ProcessAncestors      []ProcessIdentity `json:"processAncestors,omitempty"`
++	ApplicationRuleProxy  string            `json:"-"`
++	ApplicationRuleSet    string            `json:"-"`
++	ApplicationDNSProfile string            `json:"dnsProfile,omitempty"`
++	SpecialProxy          string            `json:"specialProxy"`
++	SpecialRules          string            `json:"specialRules"`
++	RemoteDst             string            `json:"remoteDestination"`
++	DSCP                  uint8             `json:"dscp"`
  
  	RawSrcAddr net.Addr `json:"-"`
  	RawDstAddr net.Addr `json:"-"`
-@@ -374,3 +387,16 @@
+@@ -374,3 +388,16 @@
  	m.SrcIPASN, m.DstIPASN = m.DstIPASN, m.SrcIPASN
  	m.SrcGeoIP, m.DstGeoIP = m.DstGeoIP, m.SrcGeoIP
  }
@@ -454,6 +680,76 @@
  	case Domain:
  		return "Domain"
  	case DomainSuffix:
+--- a/hub/executor/executor.go
++++ b/hub/executor/executor.go
+@@ -103,6 +103,23 @@
+ 	updateHosts(cfg.Hosts)
+ 	updateGeneral(cfg.General, true)
+ 	updateDNS(cfg.DNS, cfg.General.IPv6)
++	applicationDNS := make(map[string]resolver.ApplicationResolvers, len(cfg.ApplicationDNS))
++	for name, settings := range cfg.ApplicationDNS {
++		if settings.Enable {
++			r := newDNSResolver(settings, cfg.General.IPv6)
++			proxy, direct := r.ProxyResolver, r.DirectResolver
++			if !proxy.Invalid() {
++				proxy = r.Resolver
++			}
++			if !direct.Invalid() {
++				direct = r.Resolver
++			}
++			applicationDNS[name] = resolver.ApplicationResolvers{Resolver: r, Proxy: proxy, Direct: direct}
++		} else {
++			applicationDNS[name] = resolver.ApplicationResolvers{Resolver: resolver.SystemResolver, Proxy: resolver.SystemResolver, Direct: resolver.SystemResolver}
++		}
++	}
++	resolver.SetApplicationDNS(applicationDNS)
+ 	updateNTP(cfg.NTP) // initialize NTP after DNS because an NTP server may be a hostname.
+ 	updateListeners(cfg.General, cfg.Listeners, force)
+ 	updateTun(cfg.General) // tun should not care "force"
+@@ -235,6 +252,18 @@
+ 	}
+ }
+ 
++func newDNSResolver(c *config.DNS, generalIPv6 bool) dns.Resolvers {
++	return dns.NewResolver(dns.Config{
++		Main: c.NameServer, Fallback: c.Fallback, IPv6: c.IPv6 && generalIPv6,
++		IPv6Timeout: c.IPv6Timeout, FallbackIPFilter: c.FallbackIPFilter,
++		FallbackDomainFilter: c.FallbackDomainFilter, FallbackLazyQuery: c.FallbackLazyQuery,
++		Default: c.DefaultNameserver, Policy: c.NameServerPolicy,
++		ProxyServer: c.ProxyServerNameserver, ProxyServerPolicy: c.ProxyServerPolicy,
++		DirectServer: c.DirectNameServer, DirectFollowPolicy: c.DirectFollowPolicy,
++		CacheAlgorithm: c.CacheAlgorithm, CacheMaxSize: c.CacheMaxSize,
++	})
++}
++
+ func updateDNS(c *config.DNS, generalIPv6 bool) {
+ 	if !c.Enable {
+ 		resolver.DefaultResolver = nil
+@@ -247,23 +276,7 @@
+ 	}
+ 
+ 	ipv6 := c.IPv6 && generalIPv6
+-	r := dns.NewResolver(dns.Config{
+-		Main:                 c.NameServer,
+-		Fallback:             c.Fallback,
+-		IPv6:                 ipv6,
+-		IPv6Timeout:          c.IPv6Timeout,
+-		FallbackIPFilter:     c.FallbackIPFilter,
+-		FallbackDomainFilter: c.FallbackDomainFilter,
+-		FallbackLazyQuery:    c.FallbackLazyQuery,
+-		Default:              c.DefaultNameserver,
+-		Policy:               c.NameServerPolicy,
+-		ProxyServer:          c.ProxyServerNameserver,
+-		ProxyServerPolicy:    c.ProxyServerPolicy,
+-		DirectServer:         c.DirectNameServer,
+-		DirectFollowPolicy:   c.DirectFollowPolicy,
+-		CacheAlgorithm:       c.CacheAlgorithm,
+-		CacheMaxSize:         c.CacheMaxSize,
+-	})
++	r := newDNSResolver(c, generalIPv6)
+ 	m := dns.NewEnhancer(dns.EnhancerConfig{
+ 		IPv6:          ipv6,
+ 		EnhancedMode:  c.EnhancedMode,
 --- a/hub/route/server.go
 +++ b/hub/route/server.go
 @@ -570,5 +570,5 @@
@@ -462,11 +758,11 @@
  func version(w http.ResponseWriter, r *http.Request) {
 -	render.JSON(w, r, render.M{"meta": C.Meta, "version": C.Version})
 -}
-+	render.JSON(w, r, render.M{"meta": C.Meta, "version": C.Version, "applicationProcessRouting": 1})
++	render.JSON(w, r, render.M{"meta": C.Meta, "version": C.Version, "applicationProcessRouting": 1, "applicationDNSRouting": 1})
 +}
 --- /dev/null
 +++ b/rules/common/application_process.go
-@@ -0,0 +1,157 @@
+@@ -0,0 +1,159 @@
 +package common
 +
 +import (
@@ -522,6 +818,7 @@
 +	if missing {
 +		return true, "REJECT"
 +	}
++	metadata.ApplicationDNSProfile = rules
 +	if enabled && mode == "rule" {
 +		metadata.ApplicationRuleSet = rules
 +		metadata.ApplicationRuleProxy = proxy
@@ -559,6 +856,7 @@
 +func (r *ApplicationProcess) Match(metadata *C.Metadata, helper C.RuleMatchHelper) (bool, string) {
 +	metadata.ApplicationRuleProxy = ""
 +	metadata.ApplicationRuleSet = ""
++	metadata.ApplicationDNSProfile = ""
 +	if r.TunOnly && metadata.Type != C.TUN {
 +		return r.fallback()
 +	}
@@ -800,7 +1098,25 @@
  	case "DOMAIN-SUFFIX":
 --- a/tunnel/tunnel.go
 +++ b/tunnel/tunnel.go
-@@ -353,13 +353,16 @@
+@@ -335,10 +335,15 @@
+ 
+ 	helper := C.RuleMatchHelper{
+ 		ResolveIP: func() {
+-			if !resolved && metadata.Host != "" && !metadata.Resolved() {
++			if !resolved && metadata.Host != "" && (!metadata.Resolved() || resolver.ApplicationDNS(metadata.ApplicationDNSProfile) != nil) {
+ 				ctx, cancel := context.WithTimeout(context.Background(), resolver.DefaultDNSTimeout)
++				ctx = resolver.WithApplicationDNS(ctx, metadata.ApplicationDNSProfile)
+ 				defer cancel()
+-				ip, err := resolver.ResolveIP(ctx, metadata.Host)
++				r := resolver.ApplicationDNS(metadata.ApplicationDNSProfile)
++				if r == nil {
++					r = resolver.DefaultResolver
++				}
++				ip, err := resolver.ResolveIPWithResolver(ctx, metadata.Host, r)
+ 				if err != nil {
+ 					log.Debugln("[DNS] resolve %s error: %s", metadata.Host, err.Error())
+ 				} else {
+@@ -353,13 +358,16 @@
  				attemptProcessLookup = false
  				if !features.CMFA {
  					// normal check for process
@@ -821,7 +1137,49 @@
  
  						if pkg, err := process.FindPackageName(metadata); err == nil { // for android (not CMFA) package names
  							metadata.Process = pkg
-@@ -659,35 +662,75 @@
+@@ -407,6 +415,16 @@
+ 	default:
+ 		proxy, rule, err = match(metadata, helper)
+ 	}
++	if r := resolver.ApplicationDNS(metadata.ApplicationDNSProfile); err == nil && r != nil && metadata.Host != "" && proxy != nil && proxy.Name() != "REJECT" {
++		ctx, cancel := context.WithTimeout(context.Background(), resolver.DefaultDNSTimeout)
++		ctx = resolver.WithApplicationDNS(ctx, metadata.ApplicationDNSProfile)
++		defer cancel()
++		metadata.DstIP, err = resolver.ResolveIPWithResolver(ctx, metadata.Host, r)
++		if err != nil {
++			return
++		}
++		metadata.DNSMode = C.DNSMapping
++	}
+ 	return
+ }
+ 
+@@ -465,6 +483,7 @@
+ 
+ 			dialMetadata := metadata.Pure()
+ 			ctx, cancel := context.WithTimeout(context.Background(), C.DefaultUDPTimeout)
++			ctx = resolver.WithApplicationDNS(ctx, metadata.ApplicationDNSProfile)
+ 			defer cancel()
+ 			rawPc, err := retry(ctx, func(ctx context.Context) (C.PacketConn, error) {
+ 				return proxy.ListenPacketContext(ctx, dialMetadata)
+@@ -557,7 +576,7 @@
+ 		return
+ 	}
+ 
+-	dialMetadata := metadata
++	dialMetadata := metadata.Pure()
+ 	if len(metadata.Host) > 0 {
+ 		if node, ok := resolver.DefaultHosts.Search(metadata.Host, false); ok {
+ 			if dstIp, _ := node.RandIP(); !resolver.IsFakeIP(dstIp) {
+@@ -572,6 +591,7 @@
+ 	var peekLen int
+ 
+ 	ctx, cancel := context.WithTimeout(context.Background(), C.DefaultTCPTimeout)
++	ctx = resolver.WithApplicationDNS(ctx, metadata.ApplicationDNSProfile)
+ 	defer cancel()
+ 	remoteConn, err := retry(ctx, func(ctx context.Context) (remoteConn C.Conn, err error) {
+ 		remoteConn, err = proxy.DialContext(ctx, dialMetadata)
+@@ -659,35 +679,75 @@
  	for {
  		var rematchProxy C.Proxy
  		var rematchRule C.Rule
