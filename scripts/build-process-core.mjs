@@ -81,7 +81,7 @@ try {
       'with_gvisor',
       '-trimpath',
       '-ldflags',
-      `-s -w -X github.com/metacubex/mihomo/constant.Version=${source.version}-app-dns-1`,
+      `-s -w -X github.com/metacubex/mihomo/constant.Version=${source.version}-app-dns-2`,
       '-o',
       resolve(root, `src-tauri/sidecar/verge-mihomo-${host}`),
     ],

@@ -516,7 +516,7 @@
         "warning": "如果你不清楚这里的设置请不要修改，并保持 DNS 覆写关闭",
         "global": "全局",
         "followProfile": "跟随订阅",
-        "globalScope": "所有应用和订阅统一使用这套 DNS，切换订阅继续生效。"
+        "globalScope": "跨订阅使用这套 DNS；仅应用 TUN 模式下，只影响已开启代理的应用，其它应用使用本机 DNS。"
       },
       "protection": {
         "title": "是否开启 DNS 覆写？",

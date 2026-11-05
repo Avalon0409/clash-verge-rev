@@ -1,6 +1,5 @@
 use anyhow::{Context as _, bail, ensure};
 use clash_verge_logging::{Type, logging};
-use serde_yaml_ng::{Mapping, Value};
 use std::{
     io::Read as _,
     os::unix::process::CommandExt as _,
@@ -12,7 +11,7 @@ use tokio::sync::Mutex;
 
 const DNS_STATE_FILE: &str = ".original_dns.txt";
 const DNS_BACKUP_DIR: &str = ".original_dns";
-// Any address routed into TUN works, since dns-hijack answers it; the value only matters if left behind.
+// Used only to recognize DNS written by older releases.
 const PLACEHOLDER_DNS: &str = "114.114.114.114";
 // Scripts run under lifecycle_lock, and networksetup waits for other preference writers without a limit.
 pub(crate) const DNS_SCRIPT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -82,41 +81,13 @@ fn restore_dns_state_dir(resource_dir: &Path, state_dir: PathBuf) -> PathBuf {
     }
 }
 
-// Without the placeholder, a LAN resolver is reached outside TUN and fake-ip is bypassed.
-fn needs_public_dns(config: &Mapping) -> bool {
-    let section = |name: &str| config.get(name).and_then(Value::as_mapping);
-    let enabled = |name: &str| {
-        section(name)
-            .and_then(|map| map.get("enable"))
-            .and_then(Value::as_bool)
-            .unwrap_or(false)
-    };
-    enabled("tun")
-        && enabled("dns")
-        && section("dns")
-            .and_then(|dns| dns.get("enhanced-mode"))
-            .and_then(Value::as_str)
-            == Some("fake-ip")
-}
-
-/// Sets the placeholder DNS while the running config needs it, and restores the system DNS otherwise.
+/// Restores DNS left by older versions without installing a replacement resolver.
 pub async fn sync_public_dns() {
-    use crate::{
-        config::Config,
-        core::{CoreManager, handle::Handle, manager::RunningMode},
-    };
-
-    let _guard = DNS_LOCK.lock().await;
-    // Exit cleanup restores DNS on its own budget; a sync queued behind it must not undo that.
-    if Handle::global().is_exiting() {
+    if crate::core::handle::Handle::global().is_exiting() {
         return;
     }
-    let core_running = !matches!(*CoreManager::global().get_running_mode(), RunningMode::NotRunning);
-    let runtime = Config::runtime().await.latest_arc();
-    if core_running && runtime.config.as_ref().is_some_and(needs_public_dns) {
-        set_public_dns().await;
-    } else {
-        let _ = unset_public_dns().await;
+    if let Err(err) = restore_public_dns().await {
+        logging!(error, Type::Config, "restore legacy system DNS failed: {err:#}");
     }
 }
 
@@ -125,24 +96,14 @@ pub async fn restore_public_dns() -> anyhow::Result<()> {
     unset_public_dns().await
 }
 
-async fn set_public_dns() {
-    logging!(debug, Type::Config, "try to set system dns");
-    let result = async {
-        let script = crate::utils::dirs::app_resources_dir()?.join("set_dns.sh");
-        run_dns_script(&script, dns_state_dir()?).await
-    }
-    .await;
-    match result {
-        Ok(()) => logging!(info, Type::Config, "set system dns successfully"),
-        Err(err) => logging!(error, Type::Config, "set system dns failed: {err:#}"),
-    }
-}
-
 async fn unset_public_dns() -> anyhow::Result<()> {
     logging!(debug, Type::Config, "try to unset system dns");
     let result = async {
         let resource_dir = crate::utils::dirs::app_resources_dir()?;
         let state_dir = restore_dns_state_dir(&resource_dir, dns_state_dir()?);
+        if !state_dir.join(DNS_STATE_FILE).exists() && !state_dir.join(DNS_BACKUP_DIR).exists() {
+            return Ok(());
+        }
         run_dns_script(&resource_dir.join("unset_dns.sh"), state_dir).await
     }
     .await;

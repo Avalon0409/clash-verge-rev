@@ -1051,9 +1051,14 @@ pub async fn enhance(
     }
     let config = application_proxy::use_application_proxy(config, settings.as_ref())?;
     let mut config = config;
-    if Config::verge().await.latest_arc().dns_scope() == crate::config::dns::DnsOverrideScope::Global {
-        config.remove("application-dns");
-    } else if settings.as_ref().is_some_and(|settings| settings.enabled) {
+    if settings.as_ref().is_some_and(|settings| settings.enabled)
+        && config
+            .get("tun")
+            .and_then(|tun| tun.get("enable"))
+            .and_then(Value::as_bool)
+            == Some(true)
+    {
+        application_profiles::apply_application_dns(&mut config);
         #[cfg(target_os = "macos")]
         {
             let servers: Vec<_> = crate::utils::resolve::dns::system_dns_upstreams()
@@ -1071,12 +1076,6 @@ pub async fn enhance(
                     }
                 }
             }
-        }
-        // Shared OS DNS queries cannot identify the originating app; resolve at its connection boundary.
-        if let Some(dns) = config.get_mut("dns").and_then(Value::as_mapping_mut) {
-            dns.insert("enhanced-mode".into(), "fake-ip".into());
-            dns.insert("fake-ip-filter".into(), Value::Sequence(vec![]));
-            dns.insert("fake-ip-filter-mode".into(), "blacklist".into());
         }
     }
     Ok((use_sort(config), keys, logs, dns))

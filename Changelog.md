@@ -1,3 +1,13 @@
+## v2.5.11
+
+<details>
+<summary><strong> 🐞 修复问题 </strong></summary>
+
+- Fix app-only TUN routing so disabled apps keep system DNS and routes, and enabled apps try subscription DNS before system DNS.
+- Preserve network adapter DNS when starting, reloading, or stopping TUN.
+
+</details>
+
 ## v2.5.10
 
 <details>

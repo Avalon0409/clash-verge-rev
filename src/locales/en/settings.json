@@ -516,7 +516,7 @@
         "warning": "If you are not familiar with these settings, please do not modify them and keep DNS Overwrite disabled",
         "global": "Global",
         "followProfile": "Follow subscription",
-        "globalScope": "Apply one DNS configuration to all applications and subscriptions. Switching subscriptions keeps these settings."
+        "globalScope": "Apply these DNS settings across subscriptions. In app-only TUN mode they affect only enabled applications; other applications use system DNS."
       },
       "protection": {
         "title": "Enable DNS Overwrite?",

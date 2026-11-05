@@ -8,6 +8,14 @@ pub fn use_application_proxy(mut config: Mapping, settings: Option<&ApplicationP
     let Some(settings) = settings.filter(|settings| settings.enabled) else {
         return Ok(config);
     };
+    if config
+        .get("tun")
+        .and_then(|tun| tun.get("enable"))
+        .and_then(Value::as_bool)
+        != Some(true)
+    {
+        return Ok(config);
+    }
     settings.validate()?;
     let global_mode = config.get("mode").and_then(Value::as_str).unwrap_or("rule").to_owned();
     let sub_rules = config.get("sub-rules").and_then(Value::as_mapping);
@@ -27,7 +35,7 @@ pub fn use_application_proxy(mut config: Mapping, settings: Option<&ApplicationP
         serde_json::json!({"pid": setting.pid, "start_time": setting.start_time, "enabled": setting.enabled, "mode": setting.routing_mode, "proxy": proxy, "rules": setting.profile_uid.as_ref().map(|uid| application_profiles::root_rules(uid)), "profile_missing": setting.profile_uid.as_ref().is_some_and(|uid| !sub_rules.is_some_and(|rules| rules.contains_key(Value::from(application_profiles::root_rules(uid)))))})
     }).collect();
     let payload = URL_SAFE_NO_PAD.encode(serde_json::to_vec(
-        &serde_json::json!({"applications": applications, "overrides": overrides, "fallback": "global", "global_mode": global_mode, "tun_only": true}),
+        &serde_json::json!({"applications": applications, "overrides": overrides, "fallback": "direct", "global_mode": global_mode, "tun_only": true}),
     )?);
     let mut rules = vec![
         Value::from(format!("APPLICATION-PROCESS,{payload},DIRECT")),
@@ -57,7 +65,7 @@ mod tests {
     #[test]
     fn app_gate_preserves_subscription_rules_and_blocks_missing_outbounds() -> Result<()> {
         let config: Mapping = serde_yaml_ng::from_str(
-            "mode: global\nfind-process-mode: off\nrules: [\"DOMAIN-KEYWORD,baidu,DIRECT\", \"MATCH,Exit\"]\nproxy-groups: [{name: Exit, type: select, proxies: [DIRECT]}]\ndns: {nameserver: [192.0.2.53]}",
+            "mode: global\ntun: {enable: true}\nfind-process-mode: off\nrules: [\"DOMAIN-KEYWORD,baidu,DIRECT\", \"MATCH,Exit\"]\nproxy-groups: [{name: Exit, type: select, proxies: [DIRECT]}]\ndns: {nameserver: [192.0.2.53]}",
         )?;
         let settings = ApplicationProxyConfig {
             enabled: true,
@@ -130,7 +138,7 @@ mod tests {
             ],
         };
         let restarted = serde_yaml_ng::from_str(&serde_yaml_ng::to_string(&settings)?)?;
-        let result = use_application_proxy(Mapping::new(), Some(&restarted))?;
+        let result = use_application_proxy(serde_yaml_ng::from_str("tun: {enable: true}")?, Some(&restarted))?;
         assert!(
             result["rules"][0]
                 .as_str()

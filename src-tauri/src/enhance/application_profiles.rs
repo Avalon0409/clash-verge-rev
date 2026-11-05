@@ -56,6 +56,45 @@ pub fn preserve_system_dns(dns: &mut Mapping, servers: &[Value]) {
     }
 }
 
+pub fn apply_application_dns(config: &mut Mapping) {
+    if let Some(mut proxy_dns) = config.get("dns").and_then(Value::as_mapping).cloned() {
+        proxy_dns.remove("listen");
+        proxy_dns.insert("enhanced-mode".into(), "redir-host".into());
+        if let Some(hosts) = config.remove("hosts") {
+            proxy_dns.insert("hosts".into(), hosts);
+        }
+        let profiles = config
+            .entry(Value::from("application-dns"))
+            .or_insert_with(|| Value::Mapping(Mapping::new()));
+        if let Some(profiles) = profiles.as_mapping_mut() {
+            profiles.insert("__global_dns".into(), proxy_dns.into());
+        }
+    }
+    let mut dns = Mapping::new();
+    for key in [
+        "nameserver",
+        "default-nameserver",
+        "proxy-server-nameserver",
+        "direct-nameserver",
+    ] {
+        dns.insert(key.into(), Value::Sequence(vec!["system".into()]));
+    }
+    dns.insert("use-hosts".into(), true.into());
+    dns.insert("use-system-hosts".into(), true.into());
+    dns.insert(
+        "ipv6".into(),
+        config.get("ipv6").cloned().unwrap_or_else(|| false.into()),
+    );
+    dns.insert("fake-ip-range".into(), "198.18.0.1/16".into());
+    super::ensure_fake_ip_range6(&mut dns);
+    // OS DNS requests lose app identity; select its resolver after the connection identifies the process.
+    dns.insert("enable".into(), true.into());
+    dns.insert("enhanced-mode".into(), "fake-ip".into());
+    dns.insert("fake-ip-filter".into(), Value::Sequence(vec![]));
+    dns.insert("fake-ip-filter-mode".into(), "blacklist".into());
+    config.insert("dns".into(), dns.into());
+}
+
 #[derive(Serialize)]
 pub struct OutboundOption {
     pub name: std::string::String,
@@ -208,6 +247,9 @@ fn import_dns(
 ) -> Result<()> {
     if let Some(mut dns) = source.get("dns").and_then(Value::as_mapping).cloned() {
         namespace_dns(&mut dns, proxies, rule_providers);
+        if let Some(hosts) = source.get("hosts") {
+            dns.insert("hosts".into(), hosts.clone());
+        }
         dns.insert("enhanced-mode".into(), "redir-host".into());
         dns.remove("listen");
         target
@@ -420,6 +462,23 @@ pub fn import_profile(target: &mut Mapping, uid: &str, source: Mapping) -> Resul
 #[allow(clippy::expect_used, reason = "tests assert by panicking")]
 mod tests {
     use super::*;
+
+    #[test]
+    fn app_only_dns_separates_system_and_subscription_settings() -> Result<()> {
+        let mut config: Mapping = serde_yaml_ng::from_str(
+            "dns: {nameserver: [192.0.2.53], nameserver-policy: {private.test: 192.0.2.54}, enhanced-mode: redir-host}\nhosts: {private.test: 192.0.2.55}\napplication-dns: {selected: {nameserver: [192.0.2.56]}}",
+        )?;
+        apply_application_dns(&mut config);
+        assert_eq!(config["dns"]["nameserver"], serde_yaml_ng::to_value(["system"])?);
+        assert!(config["dns"].get("nameserver-policy").is_none());
+        assert!(config.get("hosts").is_none());
+        assert_eq!(
+            config["application-dns"]["__global_dns"]["hosts"]["private.test"],
+            "192.0.2.55"
+        );
+        assert_eq!(config["application-dns"]["selected"]["nameserver"][0], "192.0.2.56");
+        Ok(())
+    }
 
     #[test]
     fn subscriptions_keep_global_defaults_and_isolate_same_names() -> Result<()> {
