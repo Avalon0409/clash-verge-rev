@@ -1,5 +1,11 @@
 {
   "name": "clash-verge",
+  "description": "Clash Verge App Proxy: application routing, Freecat subscriptions and DNS overrides",
+  "homepage": "https://github.com/Avalon0409/clash-verge-rev",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Avalon0409/clash-verge-rev.git"
+  },
   "version": "2.5.11",
   "license": "GPL-3.0-only",
   "scripts": {

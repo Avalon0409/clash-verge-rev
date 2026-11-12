@@ -18,13 +18,13 @@ import {
   getSnapshotNotices,
   showNotice,
 } from '@/services/notice-service'
+import { PROJECT_FAQ_URL } from '@/services/project-info'
 import type { TranslationKey } from '@/types/generated/i18n-keys'
 import { openExternalUrl } from '@/utils/open-external-url'
 
 const SERVICE_PERMISSION_NOTICE =
   'settings.feedback.notifications.clashService.permissionFallback'
-const SERVICE_PERMISSION_GUIDE =
-  'https://clash-verge-rev.github.io/faq/windows.html#service-core-permissions'
+const SERVICE_PERMISSION_GUIDE = `${PROJECT_FAQ_URL}#service-core-permissions`
 const SERVICE_OWNER_NOTICE =
   'settings.feedback.notifications.clashService.appDataNotOwned'
 

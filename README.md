@@ -1,141 +1,72 @@
 <h1 align="center">
-  <img src="./src-tauri/icons/icon.png" alt="Clash" width="128" />
-  <br>
-  Continuation of <a href="https://github.com/zzzgydi/clash-verge">Clash Verge</a>
-  <br>
+  <img src="./src-tauri/icons/icon.png" alt="Clash Verge App Proxy" width="128" />
+  <br />
+  Clash Verge App Proxy
 </h1>
 
-<h3 align="center">
-A Clash Meta GUI based on <a href="https://github.com/tauri-apps/tauri">Tauri</a>.
-</h3>
+<p align="center">面向 Windows 和 macOS 的应用与进程代理客户端，支持独立订阅、Freecat 账号和 DNS 覆盖。</p>
 
 <p align="center">
-  Languages:
-  <a href="./docs/README_en.md">English</a> ·
-  <a href="./docs/README_es.md">Español</a> ·
-  <a href="./docs/README_fa.md">فارسی</a> ·
-  <a href="./docs/README_ja.md">日本語</a> ·
-  <a href="./docs/README_ko.md">한국어</a> ·
-  <a href="./docs/README_pt.md">Português</a> ·
-  <a href="./docs/README_ru.md">Русский</a> ·
-  <a href="./README.md">简体中文</a>
+  <a href="https://github.com/Avalon0409/clash-verge-rev/tree/main">项目源码</a> ·
+  <a href="https://github.com/Avalon0409/clash-verge-rev/releases">下载安装</a> ·
+  <a href="./docs/usage.md">使用说明</a> ·
+  <a href="./docs/faq.md">常见问题</a> ·
+  <a href="./docs/README_en.md">English</a>
 </p>
 
-## Preview
+Clash Verge App Proxy 是本仓库独立维护的 Clash Verge Rev 派生版本。我们在原有代理客户端的基础上，加入了应用与进程分流、应用独立订阅、Freecat 账号订阅及全局和订阅级 DNS 覆盖。项目说明、发行包和问题反馈均由本仓库维护。
 
-| Dark                             | Light                             |
-| -------------------------------- | --------------------------------- |
-| ![预览](./docs/preview_dark.png) | ![预览](./docs/preview_light.png) |
+## 安装与更新
 
-## Install
+从 [本项目 Releases](https://github.com/Avalon0409/clash-verge-rev/releases) 下载带有 `app-proxy` 标识的发行包，并按附件中的操作系统和架构选择安装文件。
 
-请到发布页面下载对应的安装包：[Release page](https://github.com/clash-verge-rev/clash-verge-rev/releases)<br>
-Go to the [Release page](https://github.com/clash-verge-rev/clash-verge-rev/releases) to download the corresponding installation package<br>
-Supports Windows (x64/x86), Linux (x64/arm64) and macOS 11+ (intel/apple).
-支持 Windows (x64/x86)、Linux (x64/arm64) 和 macOS 11+ (intel/apple)。
+| 平台 | 安装说明 |
+| --- | --- |
+| Windows | 使用匹配系统架构的安装包；启用 TUN 时按客户端提示安装或启动服务。 |
+| macOS | 需要 macOS 12 或更新版本；选择匹配 Intel 或 Apple Silicon 的安装包。 |
 
-#### 我应当怎样选择发行版
+本项目的自定义发行包采用手动更新。升级时从上述 Releases 下载新版；应用分流需要与客户端配套的内置核心，可以在核心设置中重新加载内置核心。具体操作见 [安装与更新说明](./docs/usage.md#安装与更新)。
 
-| 版本        | 特征                                     | 链接                                                                                   |
-| :---------- | :--------------------------------------- | :------------------------------------------------------------------------------------- |
-| Stable      | 正式版，高可靠性，适合日常使用。         | [Release](https://github.com/clash-verge-rev/clash-verge-rev/releases)                 |
-| Alpha(废弃) | 测试发布流程。                           | [Alpha](https://github.com/clash-verge-rev/clash-verge-rev/releases/tag/alpha)         |
-| AutoBuild   | 滚动更新版，适合测试反馈，可能存在缺陷。 | [AutoBuild](https://github.com/clash-verge-rev/clash-verge-rev/releases/tag/autobuild) |
+## 功能
 
-#### 安装说明和常见问题，请到 [文档页](https://clash-verge-rev.github.io/) 查看
+- 按应用选择规则分流或强制代理，并保存各自的订阅和节点。
+- 显示应用、父子进程、连接和实时流量，支持进程临时覆盖及恢复继承配置。
+- 在 Windows 发现开始菜单中的应用，在 macOS 发现 `.app` 应用并覆盖包内子进程。
+- 使用 Freecat 账号登录并导入、更新订阅；账号秘密保存在 macOS Keychain 或 Windows Credential Manager 中。
+- 设置全局 DNS 覆盖和独立订阅的 DNS 覆盖。
+- 管理系统代理、TUN、节点、规则、订阅增强、主题和 WebDAV 备份。
 
-### TG 频道: [@clash_verge_rev](https://t.me/clash_verge_re)
+应用代理打开后，未配置和已关闭代理的 TUN 应用默认使用系统网络。系统代理、应用代理和进程临时设置的作用范围见 [使用说明](./docs/usage.md)。
 
----
+Windows 按完整 EXE 路径保存应用配置。点击刷新会清理已不存在的应用及其保存配置；新版 EXE 可以重新选择和配置。现有继承覆盖父子进程。详见 [Windows 应用更新](./docs/faq.md#windows-application-updates)。
 
-## Promotion
+## 开发
 
-### ✈️ [AI云边 -- 全新架构机场 ClaudeBorder](https://cruise.54678999.xyz/#/register?code=58q5UJZc)
+本项目以 `main` 为主分支，功能和修复通过独立分支开发。准备 Node.js、项目指定的 pnpm、Rust 工具链、Go，以及对应平台的 Tauri 编译依赖后执行：
 
-🔥热销中使用本链接注册即送 **3 天免费试用**，每日 **1GB 流量**：👉 [点此注册](https://cruise.54678999.xyz/#/register?code=58q5UJZc)
-
-#### AI云边 -- 全新架构机场。
-
-- 💻 多次**技术迭代后**全新亮相。
-- 🗺 全**高速稳定**正价节点。
-- 🌏 **海外团队**，不跑路
-- 🚀 线路**冗余**设计，**自动化运维**对抗各类封锁
-- 👨‍🦲 团队架构师为**大厂**网络架构师
-- 💰 极致**稳定**，亲民价**价格**
-- 🌐 全面支持**流媒体及各AI访问**
-- 🙋 7*12小时真人客服。解决您的各类问题。
-
-🌐 官网：👉 [https://www.claudeborder.com](https://cruise.54678999.xyz/#/register?code=58q5UJZc)
-
-### 🤖 [GPTKefu —— 与 Crisp 深度整合的 AI 智能客服平台](https://gptkefu.com)
-
-- 🧠 深度理解完整对话上下文 + 图片识别，自动给出专业、精准的回复，告别机械式客服。
-- ♾️ **不限回答数量**，无额度焦虑，区别于其他按条计费的 AI 客服产品。
-- 💬 售前咨询、售后服务、复杂问题解答，全场景轻松覆盖，真实用户案例已验证效果。
-- ⚡ 3 分钟极速接入，零门槛上手，即刻提升客服效率与客户满意度。
-- 🎁 高级套餐免费试用 14 天，先体验后付费：👉 [立即试用](https://gptkefu.com)
-- 📢 智能客服TG 频道：[@crisp_ai](https://t.me/crisp_ai)
-
----
-
-## Features
-
-- 基于性能强劲的 Rust 和 Tauri 2 框架
-- 内置[Clash.Meta(mihomo)](https://github.com/MetaCubeX/mihomo)内核，并支持切换 `Alpha` 版本内核。
-- 简洁美观的用户界面，支持自定义主题颜色、代理组/托盘图标以及 `CSS Injection`。
-- 配置文件管理和增强（Merge 和 Script），配置文件语法提示。
-- 系统代理和守卫、`TUN(虚拟网卡)` 模式。
-- 可视化节点和规则编辑
-- WebDav 配置备份和同步
-
-### FAQ
-
-Refer to [Doc FAQ Page](https://clash-verge-rev.github.io/faq/windows.html)
-
-### Donation
-
-[捐助Clash Verge Rev的开发](https://github.com/sponsors/clash-verge-rev)
-
-## Development
-
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for more details.
-
-To run the development server, execute the following commands after all prerequisites for **Tauri** are installed:
-
-```shell
-pnpm i
-pnpm run prebuild
+```sh
+git clone --branch main https://github.com/Avalon0409/clash-verge-rev.git
+cd clash-verge-rev
+pnpm install
+pnpm prebuild
+pnpm build:process-core
 pnpm dev
 ```
 
-`pnpm dev` preserves the Development Channel's installed service state: an
-existing service is used, while a previously uninstalled service remains
-uninstalled and the app starts in Sidecar mode. Use `pnpm dev:service` to
-explicitly install or update the isolated development service before launch,
-or `pnpm dev:sidecar` to force the unprivileged Sidecar workflow.
+`pnpm build:process-core` 会校验并重建本项目的应用分流核心。使用 `pnpm prebuild --force` 后应重新运行它。
 
-## Contributions
+`pnpm dev` 使用独立开发环境，保留该环境已有的服务安装状态。需要主动安装或更新开发服务时运行 `pnpm dev:service`；需要 Sidecar 模式时运行 `pnpm dev:sidecar`。
 
-Issue and PR welcome!
+构建与贡献说明见 [CONTRIBUTING.md](./CONTRIBUTING.md)。
 
-## Acknowledgement
+## 反馈
 
-Clash Verge rev was based on or inspired by these projects and so on:
+在 [本项目已有反馈](https://github.com/Avalon0409/clash-verge-rev/issues) 中查找相同问题。Issues 关闭时，维护者可以通过 [Pull requests](https://github.com/Avalon0409/clash-verge-rev/pulls) 提供问题说明和修复提案。请附上客户端版本、发行包标签、系统版本和复现步骤，提交前移除日志中的账号秘密和订阅凭据。
 
-- [zzzgydi/clash-verge](https://github.com/zzzgydi/clash-verge): A Clash GUI based on tauri. Supports Windows, macOS and Linux.
-- [tauri-apps/tauri](https://github.com/tauri-apps/tauri): Build smaller, faster, and more secure desktop applications with a web frontend.
-- [Dreamacro/clash](https://github.com/Dreamacro/clash): A rule-based tunnel in Go.
-- [MetaCubeX/mihomo](https://github.com/MetaCubeX/mihomo): A rule-based tunnel in Go.
-- [Fndroid/clash_for_windows_pkg](https://github.com/Fndroid/clash_for_windows_pkg): A Windows/macOS GUI based on Clash.
-- [vitejs/vite](https://github.com/vitejs/vite): Next generation frontend tooling. It's fast!
+## 隐私与许可
 
-## Privacy
+配置、应用分流设置和日志保存在本机。账号登录、订阅更新、DNS、测速和 WebDAV 备份会联系对应服务；具体数据流与凭据存储方式见 [隐私说明](./PRIVACY.md)。
 
-Clash Verge Rev 不收集任何用户数据，配置与日志仅保存在本地。详见[隐私政策](./PRIVACY.md)。
+本项目沿用 Clash Verge Rev、Clash Verge 及其贡献者的来源署名，基于 Tauri 和 Mihomo 构建，使用 GPL-3.0-only 许可。原有版权声明与许可证保留在源码和 [LICENSE](./LICENSE) 中。
 
-Clash Verge Rev does not collect any user data; configuration and logs stay on
-your own device. See the [Privacy Policy](./PRIVACY.md) for details.
-
-## License
-
-GPL-3.0 License. See [License here](./LICENSE) for details.
+其他语言： [Español](./docs/README_es.md) · [فارسی](./docs/README_fa.md) · [日本語](./docs/README_ja.md) · [한국어](./docs/README_ko.md) · [Português](./docs/README_pt.md) · [Русский](./docs/README_ru.md)

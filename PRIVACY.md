@@ -1,208 +1,72 @@
-# Privacy Policy
+# Clash Verge App Proxy privacy policy
 
-**Applies to:** the Clash Verge Rev desktop application for Windows, macOS and
-Linux, distributed from
-<https://github.com/clash-verge-rev/clash-verge-rev/releases>.
+**Applies to:** the Windows and macOS custom releases maintained in [Avalon0409/clash-verge-rev](https://github.com/Avalon0409/clash-verge-rev).
 
-**Last updated:** 2026-09-09
+**Last updated:** 2026-11-12
 
-Clash Verge Rev is a free and open-source graphical client for the
-[mihomo](https://github.com/MetaCubeX/mihomo) proxy core, maintained by
-volunteers. The project has no company behind it, no user accounts, and no
-server of its own that the application talks to.
+Clash Verge App Proxy stores application configuration and logs locally. Features that contact a network service include proxy traffic, Freecat sign-in, subscription downloads, DNS, network tests and backups. This document describes those connections and the data they use.
 
-## 1. Summary
+## Local configuration and credentials
 
-- The project **collects nothing**. There is no telemetry, no analytics, no
-  crash or usage reporting, no advertising or tracking SDK, and no registration.
-  No data of any kind is sent to the maintainers or to infrastructure operated
-  by this project.
-- Your configuration, credentials and logs are stored **only on your own
-  device**, in plain files you can read, back up or delete at any time
-  (Section 3).
-- The application connects only to endpoints that you configure (proxy servers,
-  subscription URLs, backup server) or to the third-party services listed in
-  Section 4. None of them are operated by this project.
-- Two connections are enabled by default and are not part of your own proxy
-  configuration: the **application update check** (Section 4.3) and the **IP
-  information card** on the Home page (Section 4.5). Both are described below,
-  and Section 6 explains how to turn them off.
-
-## 2. Who is responsible
-
-The Clash Verge Rev maintainers, reachable through the project's issue tracker
-at <https://github.com/clash-verge-rev/clash-verge-rev/issues>. Because the
-application performs no data collection, there is no data controller
-relationship, no processing agreement, and no data to request or erase from us.
-
-## 3. Data stored on your device
-
-All application data lives in a single directory:
+The custom client uses the existing application data directory:
 
 | Platform | Location |
 | --- | --- |
 | Windows | `%APPDATA%\io.github.clash-verge-rev.clash-verge-rev` |
 | macOS | `~/Library/Application Support/io.github.clash-verge-rev.clash-verge-rev` |
-| Linux | `$XDG_DATA_HOME/io.github.clash-verge-rev.clash-verge-rev` (usually `~/.local/share/…`) |
 
-It contains:
+Application settings include selected application paths, routing modes, subscriptions and nodes. Profile files can contain subscription URLs, proxy addresses and credentials. Core caches, DNS configuration and logs also live on the device. WebDAV connection details are stored with the application settings.
 
-- `verge.yaml` — application settings. If you configure WebDAV backup, the
-  server URL, user name and password are stored here **in plain text**.
-- `config.yaml`, `profiles.yaml` and `profiles/` — your proxy configuration and
-  downloaded subscriptions. These normally contain **subscription URLs (which
-  often embed a personal token), proxy server addresses, ports, passwords and
-  UUIDs**.
-- `logs/` and `service-logs/` — application and privileged-service logs. Core
-  logs can contain requested domain names, IP addresses and connection metadata,
-  depending on the log level you select.
-- Core runtime files (for example mihomo's `cache.db` and GeoIP/GeoSite
-  databases) used by the proxy core.
+Freecat passwords, login sessions and subscription decryption material use **macOS Keychain** or **Windows Credential Manager**. Profile metadata stores the account's service address, email and a reference to those credentials. Copying application files to another computer requires signing in there. Remove an account through the client to remove its associated stored credentials.
 
-None of this leaves your device unless you enable WebDAV backup (Section 4.9),
-export a backup yourself, or attach these files to a bug report.
+Logs can contain application paths, process information, requested domains, IP addresses and connection errors. The log level and cleanup settings control what is retained. Exported configurations and logs may include sensitive account or subscription information.
 
-Application logs are deleted automatically after a retention period you choose
-in *Settings → Miscellaneous → Auto Log Clean* (default: 7 days; `Never Clean` keeps
-them indefinitely). Uninstalling the application and removing the directory
-above deletes everything else.
+## Network connections
 
-**When reporting a bug**, review logs and configuration before attaching them:
-they may reveal your proxy servers, subscription tokens and browsing
-destinations.
+### Proxy traffic
 
-## 4. Network connections the application makes
+The bundled Mihomo core sends routed traffic to the proxy servers selected in your configuration. Direct traffic uses the system network. The selected proxy and destination services govern their own data handling.
 
-### 4.1 Proxy traffic
+### Freecat accounts
 
-Traffic you route through the application is handled by the bundled mihomo core
-and goes to the proxy servers **you** configured. It is not inspected, recorded
-or forwarded anywhere by this project. Your proxy provider can see this traffic
-to the extent any proxy operator can; their privacy policy applies.
+Signing in sends your account email and password over HTTPS to the service address you provide. Subscription refreshes use the returned login session and download subscription data from that provider. The client stores account secrets in the operating system's credential store and decrypts the returned subscription locally.
 
-### 4.2 Subscription (profile) updates
+The account provider operates this login and subscription service. Its privacy policy applies to the information you submit to it.
 
-When you add a remote profile, the application downloads it from the URL you
-supplied, sending a `User-Agent` of `clash-verge/v<version>` unless you set a
-different one for that profile. If you enable automatic updates for a profile,
-this request repeats on the interval you choose. The subscription provider sees
-your IP address and this request; it is the same request your browser would
-make. Requests can be sent directly, through the system proxy, or through the
-application's own proxy port, as configured per profile.
+### Remote subscriptions
 
-### 4.3 Application update check — *enabled by default*
+Adding or refreshing a remote profile contacts its subscription URL. The provider receives normal HTTP request information, such as your source IP address and User-Agent, along with any credentials included in the URL. A profile's automatic refresh uses the interval you configure.
 
-On startup the application asks whether a newer release exists, in order, from:
+### DNS
 
-- `https://update.hwdns.net/…` and `https://gh-proxy.org/…` (third-party GitHub
-  mirrors, used for reachability in restricted networks)
-- `https://github.com/clash-verge-rev/clash-verge-rev/releases/…`
+DNS resolution contacts the resolvers used by your system and generated core configuration. Global or subscription-level DNS overrides can change those resolvers. They receive the domain names being resolved. Application-routing mode selects DNS settings after identifying the application connection.
 
-The request carries only what any HTTP request carries: your IP address, the
-`User-Agent` and the requested file. No identifier is generated or sent, and no
-result is reported back to the project. Downloaded updates are verified against
-a Minisign public key compiled into the application.
+### Updates and downloads
 
-Disable it in *Settings → Miscellaneous → Auto Check Update*.
+Custom `app-proxy` releases use manual application updates from [this project's Releases](https://github.com/Avalon0409/clash-verge-rev/releases). The client has no upstream application-update endpoint configured. GitHub receives normal requests when you open the release page or download a package.
 
-### 4.4 Proxy core update — *user-initiated*
+Application routing uses the matching bundled core. Developer resource preparation and user-initiated component downloads can contact component providers, including Mihomo and the service component's release host.
 
-Updating the mihomo core downloads it from GitHub Releases
-(`https://github.com/MetaCubeX/mihomo/releases/…`) only when you start the
-update.
+### IP information and network tests
 
-### 4.5 IP information card — *enabled by default*
+The home IP card contacts third-party IP and geolocation services while active. The configured service receives the source IP of its request. Latency tests contact their configured test URL through the tested proxy. Streaming and AI availability tests contact the services being tested when you start them.
 
-The Home page shows your apparent public IP address and its geolocation. To do
-this it queries one randomly chosen service from:
-`api.ip.sb`, `ipapi.co`, `api.ipapi.is`, `ipwho.is`, `ip.api.skk.moe`,
-`get.geojs.io`. The query is refreshed about every 5 minutes while the card is
-visible and the window is shown; it is not sent while the window is hidden or
-the Home page is not in view.
+These destinations are independent third parties. The client also supports opening external dashboards, which load in your browser and connect to the local core.
 
-By design these services see and return the IP address the request came from —
-that is the feature. If a proxy is active, they see the proxy's address.
-Each service is operated by an independent third party under its own privacy
-policy; the project has no agreement with any of them. Keep the Home page
-closed (or the application minimised) if you do not want these requests.
+### WebDAV and exported backups
 
-### 4.6 Latency tests — *user-initiated*
+WebDAV backup uploads configuration to the server you choose. Backup archives can include subscription URLs and proxy credentials. Account secrets in Keychain or Credential Manager are separate from the profile files. You control local exports and the destination of backup uploads.
 
-Testing a proxy or group sends an HTTP request through that proxy to
-`http://cp.cloudflare.com/generate_204`, or to the test URL you configure.
+### Local control and proxy listeners
 
-### 4.7 Streaming availability test — *user-initiated*
+The core exposes local control and proxy listeners according to its runtime configuration. Enabling LAN access changes which devices can reach a proxy listener; check the runtime configuration when configuring network access.
 
-The unlock test sends requests through your local proxy port to the streaming
-and AI services being tested (Netflix, Disney+, YouTube, Spotify, OpenAI and
-similar). It runs only when you start it, and only through the proxy you have
-selected.
+## Your controls
 
-### 4.8 DNS
+You can change application routing, system proxy, DNS settings, subscription refresh intervals, network-test destinations and WebDAV settings. You can disable the home IP card and configure log cleanup. To remove a Freecat account, remove it through the client; to remove file-based configuration, delete the applicable data files after making any backup you want to retain.
 
-The generated core configuration uses public DoH resolvers by default
-(`doh.pub`, `dns.alidns.com`), and your proxy configuration may define others.
-Resolvers see the domain names being resolved. You can change or replace them in
-the DNS settings and in your own configuration.
+## Project services and reporting
 
-### 4.9 WebDAV backup — *disabled until you configure it*
+This fork adds no analytics or telemetry endpoint. Account providers, DNS providers, proxies, GitHub and backup servers handle the requests described above under their own policies.
 
-If you set up backup, the application uploads a ZIP archive to the WebDAV server
-you specify. The archive contains your profiles, `profiles.yaml`, `config.yaml`,
-the DNS configuration and `verge.yaml`; **WebDAV credentials are stripped from
-`verge.yaml` before upload, but proxy servers, passwords and subscription URLs
-inside your profiles are not**. Treat a backup as sensitive and use a server you
-trust. Backups are only transferred to that server.
-
-### 4.10 Local listeners
-
-The proxy ports and the internal control port bind to `127.0.0.1` only. They are
-not exposed to your network unless you deliberately configure the core to allow
-LAN access.
-
-## 5. Third-party components and services
-
-The application bundles or depends on software with its own behaviour and
-policies:
-
-- **mihomo (Clash.Meta) core** — <https://github.com/MetaCubeX/mihomo>.
-  Performs the actual proxying and DNS resolution.
-- **Tauri and the system WebView** — the user interface renders in the
-  operating system's web engine: Microsoft Edge WebView2 on Windows (subject to
-  the [Microsoft Privacy Statement](https://privacy.microsoft.com/privacystatement)),
-  WKWebView on macOS, WebKitGTK on Linux.
-- **External dashboards** — opening a web dashboard (metacubexd, Yacd, Zash
-  Board) loads a third-party site in your browser; it then talks to your local
-  core.
-- **GitHub** — hosts the source, releases and update metadata; it sees download
-  requests, and anything you post in issues is public.
-- **Your proxy and subscription providers**, and any WebDAV or DNS provider you
-  configure, are independent of this project and govern their own data handling.
-
-## 6. Your controls
-
-- *Settings → Miscellaneous → Auto Check Update* — turn off the update check.
-- *Settings → Miscellaneous → Auto Log Clean* — set log retention, or `Never Clean`.
-- Per-profile update interval — turn off automatic subscription refresh.
-- WebDAV backup is inactive until you enter server details, and can be cleared
-  at any time.
-- The IP information card only queries while the Home page is visible
-  (Section 4.5).
-- Everything else is a plain file on your disk: delete the application data
-  directory to remove all stored data.
-
-## 7. Children
-
-The application is a network tool with no content directed at children and no
-data collection of any kind.
-
-## 8. Changes
-
-Changes to this policy are made in the repository and are visible in its Git
-history. The date at the top reflects the most recent change.
-
-## 9. Contact
-
-Open an issue at
-<https://github.com/clash-verge-rev/clash-verge-rev/issues>. Please do not
-include logs or configuration files containing credentials in public issues.
+Use [this repository](https://github.com/Avalon0409/clash-verge-rev) for questions and reports. Remove passwords, sessions, subscription credentials and private configuration from public attachments. Changes to this document are tracked in the repository history.

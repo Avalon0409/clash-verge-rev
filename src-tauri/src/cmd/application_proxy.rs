@@ -147,6 +147,13 @@ pub async fn list_proxy_applications() -> CmdResult<Vec<ProxyApplication>> {
     list_applications().await.with_error_code("APPLICATION_LIST_FAILED")
 }
 
+#[tauri::command]
+pub async fn remove_missing_proxy_applications() -> CmdResult<()> {
+    crate::feat::remove_missing_proxy_applications()
+        .await
+        .with_error_code("APPLICATION_PROXY_UPDATE_FAILED")
+}
+
 #[cfg(target_os = "windows")]
 async fn list_applications() -> Result<Vec<ProxyApplication>> {
     tokio::task::spawn_blocking(windows::list_applications)

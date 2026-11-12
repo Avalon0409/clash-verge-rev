@@ -3,8 +3,16 @@
 <details>
 <summary><strong> 🐞 修复问题 </strong></summary>
 
+- Remove missing applications and their saved routing settings when refreshing the application list.
 - Fix app-only TUN routing so disabled apps keep system DNS and routes, and enabled apps try subscription DNS before system DNS.
 - Preserve network adapter DNS when starting, reloading, or stopping TUN.
+
+</details>
+
+<details>
+<summary><strong> 🚀 优化改进 </strong></summary>
+
+- Update project documentation and help links for Clash Verge App Proxy.
 
 </details>
 

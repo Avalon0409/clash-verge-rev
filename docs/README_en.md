@@ -1,136 +1,72 @@
 <h1 align="center">
-  <img src="../src-tauri/icons/icon.png" alt="Clash" width="128" />
-  <br>
-  Continuation of <a href="https://github.com/zzzgydi/clash-verge">Clash Verge</a>
-  <br>
+  <img src="../src-tauri/icons/icon.png" alt="Clash Verge App Proxy" width="128" />
+  <br />
+  Clash Verge App Proxy
 </h1>
 
-<h3 align="center">
-A Clash Meta GUI built with <a href="https://github.com/tauri-apps/tauri">Tauri</a>.
-</h3>
+<p align="center">Application and process routing for Windows and macOS, with independent subscriptions, Freecat accounts and DNS overrides.</p>
 
 <p align="center">
-  Languages:
-  <a href="./README_en.md">English</a> ·
-  <a href="./README_es.md">Español</a> ·
-  <a href="./README_fa.md">فارسی</a> ·
-  <a href="./README_ja.md">日本語</a> ·
-  <a href="./README_ko.md">한국어</a> ·
-  <a href="./README_pt.md">Português</a> ·
-  <a href="./README_ru.md">Русский</a> ·
+  <a href="https://github.com/Avalon0409/clash-verge-rev/tree/main">Source</a> ·
+  <a href="https://github.com/Avalon0409/clash-verge-rev/releases">Downloads</a> ·
+  <a href="./usage_en.md">User guide</a> ·
+  <a href="./faq_en.md">FAQ</a> ·
   <a href="../README.md">简体中文</a>
 </p>
 
-## Preview
+Clash Verge App Proxy is an independently maintained derivative of Clash Verge Rev. This repository adds application and process routing, separate subscriptions per application, Freecat account subscriptions, and global and subscription-level DNS overrides. This repository maintains the documentation, packages and feedback for this version.
 
-| Dark                                | Light                                 |
-| ----------------------------------- | ------------------------------------- |
-| ![Dark Preview](./preview_dark.png) | ![Light Preview](./preview_light.png) |
+## Installation and updates
 
-## Install
+Download a release marked `app-proxy` from [this project's Releases](https://github.com/Avalon0409/clash-verge-rev/releases). Select the operating system and architecture shown in the release assets.
 
-Visit the [Release page](https://github.com/clash-verge-rev/clash-verge-rev/releases) to download the installer that matches your platform.<br>
-We provide packages for Windows (x64/x86), Linux (x64/arm64), and macOS 10.15+ (Intel/Apple).
+| Platform | Installation |
+| --- | --- |
+| Windows | Choose the matching installer. Install or start the service when the client prompts you to enable TUN. |
+| macOS | Requires macOS 12 or later. Choose the matching Intel or Apple Silicon package. |
 
-#### Choosing a Release Channel
-
-| Channel     | Description                                                           | Link                                                                                   |
-| :---------- | :-------------------------------------------------------------------- | :------------------------------------------------------------------------------------- |
-| Stable      | Official builds with high reliability, ideal for daily use.           | [Release](https://github.com/clash-verge-rev/clash-verge-rev/releases)                 |
-| Alpha (EOL) | Legacy builds used to validate the publish pipeline.                  | [Alpha](https://github.com/clash-verge-rev/clash-verge-rev/releases/tag/alpha)         |
-| AutoBuild   | Rolling builds for testing and feedback. Expect experimental changes. | [AutoBuild](https://github.com/clash-verge-rev/clash-verge-rev/releases/tag/autobuild) |
-
-#### Installation Guides & FAQ
-
-Read the [project documentation](https://clash-verge-rev.github.io/) for install steps, troubleshooting, and frequently asked questions.
-
-### Telegram Channel
-
-Join [@clash_verge_rev](https://t.me/clash_verge_re) for update announcements.
-
----
-
-## Promotion
-
-### ✈️ [Doggygo VPN — A Technical-Grade Proxy Service](https://cvr.dginv.click/#/register?code=oaxsAGo6)
-
-🚀 A high-performance, overseas, technical-grade proxy service offering free trials and discounted plans, fully unlocking streaming platforms and AI services. The world’s first provider to adopt the **QUIC protocol**.
-
-🎁 Register via the **Clash Verge exclusive invitation link** to receive **3 days of free trial**, with **1GB traffic per day**: 👉 [Register here](https://cvr.dginv.click/#/register?code=oaxsAGo6)
-
-#### **Core Advantages:**
-
-- 📱 Self-developed iOS client (the industry’s “only one”), with technology proven in production and **significant ongoing R&D investment**
-- 🧑‍💻 **12-hour live customer support** (also assists with Clash Verge usage issues)
-- 💰 Discounted plans at **only CNY 21 per month, 160GB traffic, 20% off with annual billing**
-- 🌍 Overseas team, no risk of shutdown or exit scams, with up to **50% referral commission**
-- ⚙️ **Cluster-based load balancing** architecture with **real-time load monitoring and elastic scaling**, high-speed dedicated lines (compatible with legacy clients), ultra-low latency, unaffected by peak hours, **4K streaming loads instantly**
-- ⚡ The world’s first **QUIC-protocol-based proxy service**, now featuring faster **QUIC-family protocols** (best paired with the Clash Verge client)
-- 🎬 Unlocks **streaming platforms and mainstream AI services**
-
-🌐 Official Website: 👉 [https://狗狗加速.com](https://cvr.dginv.click/#/register?code=oaxsAGo6)
-
-### 🤖 [GPTKefu — AI-Powered Customer Service Platform Deeply Integrated with Crisp](https://gptkefu.com)
-
-- 🧠 Deep understanding of full conversation context + image recognition, automatically providing professional and precise replies — no more robotic responses.
-- ♾️ **Unlimited replies**, no quota anxiety — unlike other AI customer service products that charge per message.
-- 💬 Pre-sales inquiries, after-sales support, complex Q&A — covers all scenarios effortlessly, with real user cases to prove it.
-- ⚡ 3-minute setup, zero learning curve — instantly boost customer service efficiency and satisfaction.
-- 🎁 Free 14-day trial of the Premium plan — try before you pay: 👉 [Start Free Trial](https://gptkefu.com)
-- 📢 AI Customer Service TG Channel: [@crisp_ai](https://t.me/crisp_ai)
-
----
+Custom releases use manual updates. Download a new package from this repository when upgrading. Application routing requires the matching bundled core; the core settings can reload it. See the [installation guide](./usage_en.md#installation-and-updates).
 
 ## Features
 
-- Built on high-performance Rust with the Tauri 2 framework
-- Ships with the embedded [Clash.Meta (mihomo)](https://github.com/MetaCubeX/mihomo) core and supports switching to the `Alpha` channel
-- Clean, polished UI with theme color controls, proxy group/tray icons, and `CSS Injection`
-- Enhanced profile management (Merge and Script helpers) with configuration syntax hints
-- System proxy controls, guard mode, and `TUN` (virtual network adapter) support
-- Visual editors for nodes and rules
-- WebDAV-based backup and sync for configurations
+- Save an application's routing mode, subscription and selected node.
+- Inspect applications, parent and child processes, connections and traffic; apply temporary process settings and restore inherited settings.
+- Discover Start Menu applications on Windows and `.app` bundles on macOS.
+- Sign in to a Freecat account and import or refresh its subscription. Account secrets use macOS Keychain or Windows Credential Manager.
+- Configure global and per-subscription DNS overrides.
+- Manage system proxy, TUN, nodes, rules, subscription enhancements, themes and WebDAV backups.
 
-### FAQ
+With application routing enabled, unconfigured and disabled TUN applications default to native system networking. See the [user guide](./usage_en.md) for how system proxy and process overrides interact with application routing.
 
-See the [FAQ page](https://clash-verge-rev.github.io/faq/windows.html) for platform-specific guidance.
-
-### Donation
-
-[Support Clash Verge Rev development](https://github.com/sponsors/clash-verge-rev)
+Windows application settings use the full EXE path. Refreshing the list removes applications and saved settings whose paths no longer exist. Select and configure a new EXE after an upgrade changes its path. Existing inheritance follows parent and child processes. See [Windows application updates](./faq_en.md#windows-application-updates).
 
 ## Development
 
-See [CONTRIBUTING.md](../CONTRIBUTING.md) for detailed contribution guidelines.
+The custom client is maintained on `main`; features and fixes use separate working branches. Install Node.js, the pnpm version declared by the project, its Rust toolchain, Go and the platform's Tauri prerequisites, then run:
 
-After installing all **Tauri** prerequisites, run the development shell with:
-
-```shell
-pnpm i
-pnpm run prebuild
+```sh
+git clone --branch main https://github.com/Avalon0409/clash-verge-rev.git
+cd clash-verge-rev
+pnpm install
+pnpm prebuild
+pnpm build:process-core
 pnpm dev
 ```
 
-## Contributions
+`pnpm build:process-core` verifies and rebuilds this project's application-routing core. Run it again after `pnpm prebuild --force`.
 
-Issues and pull requests are welcome!
+`pnpm dev` preserves the isolated development environment's existing service state. Use `pnpm dev:service` to install or update that service explicitly, or `pnpm dev:sidecar` to use Sidecar mode.
 
-## Acknowledgement
+See [CONTRIBUTING.md](../CONTRIBUTING.md) for build and contribution details.
 
-Clash Verge Rev builds on or draws inspiration from these projects:
+## Feedback
 
-- [zzzgydi/clash-verge](https://github.com/zzzgydi/clash-verge): A Tauri-based Clash GUI for Windows, macOS, and Linux.
-- [tauri-apps/tauri](https://github.com/tauri-apps/tauri): Build smaller, faster, more secure desktop apps with a web frontend.
-- [Dreamacro/clash](https://github.com/Dreamacro/clash): A rule-based tunnel written in Go.
-- [MetaCubeX/mihomo](https://github.com/MetaCubeX/mihomo): A rule-based tunnel written in Go.
-- [Fndroid/clash_for_windows_pkg](https://github.com/Fndroid/clash_for_windows_pkg): A Clash GUI for Windows and macOS.
-- [vitejs/vite](https://github.com/vitejs/vite): Next-generation frontend tooling with blazing-fast DX.
+Search [this repository's issues](https://github.com/Avalon0409/clash-verge-rev/issues) for an existing report. When Issues are disabled, maintainers can record a problem and proposed fix in [Pull requests](https://github.com/Avalon0409/clash-verge-rev/pulls). Include the client version, release tag, operating system and reproduction steps. Remove account secrets and subscription credentials from attachments.
 
-## Privacy
+## Privacy and license
 
-Clash Verge Rev does not collect any user data; configuration and logs stay on
-your own device. See the [Privacy Policy](../PRIVACY.md) for details.
+Configuration, routing settings and logs are stored locally. Account sign-in, subscription refreshes, DNS, latency tests and WebDAV backups contact their respective services. See the [privacy policy](../PRIVACY.md) for data flows and credential storage.
 
-## License
+This project retains attribution to Clash Verge Rev, Clash Verge and their contributors. It uses Tauri and Mihomo and is licensed under GPL-3.0-only. Existing copyright notices and [LICENSE](../LICENSE) remain part of the source.
 
-GPL-3.0 License. See the [license file](../LICENSE) for details.
+Other languages: [Español](./README_es.md) · [فارسی](./README_fa.md) · [日本語](./README_ja.md) · [한국어](./README_ko.md) · [Português](./README_pt.md) · [Русский](./README_ru.md)

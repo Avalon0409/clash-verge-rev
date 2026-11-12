@@ -22,6 +22,7 @@ import {
 } from '@/services/cmds'
 import { mutate } from '@/services/mutate'
 import { showNotice } from '@/services/notice-service'
+import { PROJECT_RELEASES_URL } from '@/services/project-info'
 import { useSetUpdateState, useUpdateState } from '@/services/states'
 import { openExternalUrl } from '@/utils/open-external-url'
 
@@ -330,9 +331,7 @@ export function UpdateViewer({ ref }: { ref?: Ref<DialogRef> }) {
             size="small"
             sx={{ whiteSpace: 'nowrap' }}
             onClick={() => {
-              openUrlWithNotice(
-                `https://github.com/clash-verge-rev/clash-verge-rev/releases/tag/v${updateInfo?.version}`,
-              )
+              openUrlWithNotice(PROJECT_RELEASES_URL)
             }}
           >
             {t('settings.modals.update.actions.goToRelease')}

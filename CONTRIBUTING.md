@@ -1,151 +1,108 @@
-# CONTRIBUTING
+# Contributing to Clash Verge App Proxy
 
-Thank you for your interest in contributing to **Clash Verge Rev**! This guide provides instructions to help you set up your development environment and start contributing effectively.
-
-## Internationalization (i18n)
-
-We welcome translations and improvements to existing locales. For details on contributing translations, please see [CONTRIBUTING_i18n.md](docs/CONTRIBUTING_i18n.md).
+This repository maintains the application-routing and Freecat derivative on `main`. Use [this repository](https://github.com/Avalon0409/clash-verge-rev) when developing or reporting changes for the custom client.
 
 ## Contribution Expectations
 
-We welcome AI-assisted contributions — AI assistance itself is not a problem. What we require is **ownership**: every pull request must show that the stated problem is understood and that the change deliberately solves it. Incoming pull requests from contributors without write access are screened by an automated review ([`pr-ai-slop-review`](.github/workflows/pr-ai-slop-review.md)) that evaluates this ownership evidence and may label high-risk submissions `ai-slop:med` or `ai-slop:high`. The policy is maintained in that file and compiled into `pr-ai-slop-review.lock.yml` (`gh aw compile`); never edit the lock file by hand. If you want to adjust the review policy, the easiest path is directing an AI coding agent to make the change — the workflow is documented in [AGENTS.md](AGENTS.md).
+Describe the problem before implementing a non-trivial change and link its existing issue. If Issues are disabled, obtain a maintainer-approved problem report first. Keep each changed area tied to the reported behavior, preserve existing configuration and credential storage, and verify the result against the reproduction.
 
-To make sure your contribution is assessed fairly:
+Repository and directory contracts live in [AGENTS.md](./AGENTS.md), [src/AGENTS.md](./src/AGENTS.md) and [src-tauri/AGENTS.md](./src-tauri/AGENTS.md). Add a regression test when it reproduces the reported bug or protects behavior that would otherwise go unchecked. Explain its purpose in the PR.
 
-- **Link a pre-existing issue.** Non-trivial changes should fix or implement something already reported in an issue. An issue created after the pull request is a much weaker signal than a genuine problem report.
-- **Keep the diff mapped to the issue.** Every changed area should be explainable from the linked issue. Unrelated refactors, formatting churn, or dependency bumps belong in separate pull requests with their own motivation.
-- **Describe the problem in your own words.** A short statement of what breaks or what is needed, and why this approach fixes it, is worth more than a long generated report.
-- **Validate against the reported behavior.** Show how the reported problem was reproduced and confirmed fixed. Generic checklists and raw tool output are not verification.
-- **Do not pad with tests or defensive code.** New tests are not expected by default. Add them only when the linked issue calls for them, keep them minimal, and explain in the pull request why each is necessary; speculative error handling and coverage of hypothetical failure modes inflate the diff without adding value.
-- **Disclose AI automation.** If an AI agent produced or co-produced the change, end the pull request body with the model and effort level (for example, `Assisted by: GPT-5.6 High`; effort is optional when your tool does not report it). The PR template intentionally omits this footer; agents add it themselves. Disclosure is transparency only — it does not affect how the change is assessed.
+PRs from contributors without write access are checked by the ownership review and may receive `ai-slop:med` or `ai-slop:high` labels. Do not pad changes with speculative tests or defensive code; keep validation tied to the reported behavior.
 
-If your pull request receives an `ai-slop` label, the fastest way to clear it is substantive: link (or ask us to create) the underlying issue, narrow the scope, or push implementation changes that respond to review feedback. Editing the pull request description alone does not change the assessment.
+## Branches
 
-## Development Setup
+`main` owns the custom client and its releases. Start feature and fix branches from `main` and target it in pull requests. Agent-created working branches use the `codex/` prefix. The old `feat/app-proxy-freecat-v2.5.8` branch retains the development history that established this version.
 
-Before contributing, you need to set up your development environment. Follow the steps below carefully.
+The original project uses `dev` as its default development branch and `main` for stable releases. This fork keeps the lines separate:
 
-### Prerequisites
+| Reference | Purpose |
+| --- | --- |
+| `origin/main` | This custom client's main branch. |
+| `upstream/main` | The original project's stable release line; the usual source for upstream updates. |
+| `upstream/dev` | The original project's development line, including unreleased changes. |
+| `dev` / `origin/dev` | Upstream development tracking; keep custom features on separate branches. |
 
-1. **Install Rust and Node.js**  
-   Our project requires both Rust and Node.js. Follow the official installation instructions [here](https://tauri.app/start/prerequisites/).
+A fresh clone needs the upstream remote for synchronization:
 
-### Windows Users
-
-> [!NOTE]  
-> **Windows ARM users must also install [LLVM](https://github.com/llvm/llvm-project/releases) (including clang) and set the corresponding environment variables.**  
-> The `ring` crate depends on `clang` when building on Windows ARM.
-
-Additional steps for Windows:
-
-- Ensure Rust and Node.js are added to your system `PATH`.
-
-- Install the GNU `patch` tool.
-
-- Use the MSVC toolchain for Rust:
-
-```bash
-rustup target add x86_64-pc-windows-msvc
-rustup set default-host x86_64-pc-windows-msvc
+```sh
+git remote add upstream https://github.com/clash-verge-rev/clash-verge-rev.git
+git fetch upstream
 ```
 
-### Install Node.js Package Manager
+Create a synchronization branch from the custom client's `main`, then merge the chosen upstream line and review conflicts and behavior there:
 
-Enable `corepack`:
-
-```bash
-corepack enable
+```sh
+git switch main
+git switch -c codex/sync-upstream
+git merge --no-commit --no-ff upstream/main
 ```
 
-### Install Project Dependencies
+Use `upstream/dev` when an unreleased fix is needed. Verify application routing, Freecat subscriptions and DNS overrides before submitting the synchronization PR to `main`. Keep project-specific documentation, release links and core patches aligned with the custom client.
 
-Node.js dependencies:
+Code, comments, commits and PR text use English. Commit subjects follow Conventional Commits. Agent-assisted PRs append an `Assisted by:` footer with the model and available effort information. The PR describes the problem, why the approach solves it and the scope; see [the template](./.github/PULL_REQUEST_TEMPLATE.md).
 
-```bash
+The existing [AI contribution review](./.github/workflows/pr-ai-slop-review.md) remains compiled with `gh aw compile`; changing its policy also requires regenerating the lock file.
+
+## Prerequisites
+
+- Node.js; CI currently uses Node 24.
+- The pnpm version declared in `package.json`.
+- The Rust toolchain declared in `rust-toolchain.toml`.
+- Go, curl, tar and Git for rebuilding the application-routing core.
+- [Tauri platform prerequisites](https://tauri.app/start/prerequisites/).
+
+Windows builds use Rust's MSVC target and the Windows SDK/build tools. Windows ARM builds also require LLVM/clang for dependencies that use `ring`.
+
+## Prepare and run
+
+```sh
+git clone --branch main https://github.com/Avalon0409/clash-verge-rev.git
+cd clash-verge-rev
 pnpm install
+pnpm prebuild
+pnpm build:process-core
+pnpm dev
 ```
 
-Ubuntu-only system packages:
+`pnpm prebuild` prepares platform resources and the service. `pnpm build:process-core` then downloads the pinned Mihomo source, verifies its checksum, applies the project patch, runs its regression packages and builds the bundled core. Run the core build again after forcing a resource refresh with `pnpm prebuild --force`.
 
-```bash
-sudo apt-get install -y libxslt1.1 libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+`pnpm dev` preserves the isolated development environment's existing service installation. Use `pnpm dev:service` to install or update the development service explicitly. Use `pnpm dev:sidecar` to run without that service. `pnpm web:dev` runs the frontend without the desktop backend.
+
+## Build custom packages
+
+On macOS:
+
+```sh
+pnpm build:app-proxy
 ```
 
-### Download the Mihomo Core Binary (Automatic)
+This rebuilds the patched core and produces a debug application bundle with `tauri.app-proxy.conf.json`. That configuration requires macOS 12 or later and disables automatic application updates.
 
-```bash
-pnpm run prebuild
-pnpm run prebuild --force  # Re-download and overwrite Mihomo core and service binaries
+On Windows:
+
+```sh
+pnpm build:process-core
+pnpm exec tauri build --config src-tauri/tauri.app-proxy.conf.json
 ```
 
-### Run the Development Server
+The Windows core build also updates the installer's bundled-core hashes. Select a target matching the installed Rust and Node architecture when cross-building.
 
-```bash
-pnpm dev           # Standard
-pnpm dev:diff      # If an app instance already exists
-pnpm dev:tauri     # Run Tauri development mode
-```
+## Validate a change
 
-### Build the Project
+Use checks relevant to the affected area:
 
-Standard build:
-
-```bash
-pnpm build
-```
-
-Fast build for testing:
-
-```bash
-pnpm build:fast
-```
-
-### Clean Build
-
-```bash
-pnpm clean
-```
-
-### Portable Version (Windows Only)
-
-```bash
-pnpm portable
-```
-
-## Contributing Your Changes
-
-### Before Committing
-
-**Code quality checks:**
-
-```bash
-# Rust backend
-cargo clippy-all
-# Frontend
+```sh
+pnpm typecheck
 pnpm lint
+pnpm arch:check
+pnpm test
+cargo fmt --check
+cargo clippy-all
 ```
 
-**Code formatting:**
+Run focused tests for the affected code before broader suites. Network and platform-specific tests need their corresponding services or native host; describe the actual coverage in the PR. [Changelog.md](./Changelog.md) records user-visible changes according to [the release-note rules](./template/Changelog.md).
 
-```bash
-# Rust backend
-cargo fmt
-# Frontend
-pnpm format
-```
+## Translations
 
-### Signing your commit
-
-Signed commits are required to verify authorship and ensure your contributions can be merged. Reference signing-commits [here](https://docs.github.com/en/authentication/managing-commit-signature-verification/signing-commits).
-
-### Submitting Your Changes
-
-1. Fork the repository.
-
-2. Create a new branch for your feature or bug fix.
-
-3. Commit your changes with clear messages and make sure it's signed.
-
-4. Push your branch and submit a pull request.
-
-We appreciate your contributions and look forward to your participation!
+See [CONTRIBUTING_i18n.md](./docs/CONTRIBUTING_i18n.md) for frontend and backend translation ownership. The Chinese and English READMEs describe the custom client; other language landing pages link to those maintained guides.

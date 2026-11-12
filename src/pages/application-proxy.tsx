@@ -58,6 +58,7 @@ import {
   resetApplicationProcess,
   listApplicationProfileOutbounds,
   listProxyApplications,
+  refreshProxyApplications,
   resolveProxyApplication,
   updateApplicationProxy,
   type ApplicationProxyChange,
@@ -94,7 +95,6 @@ const ApplicationProxyPage = () => {
     data: installed = [],
     error: listError,
     isPending: loadingApplications,
-    refetch: refreshInstalled,
   } = useQuery({
     queryKey: ['listProxyApplications'],
     queryFn: listProxyApplications,
@@ -626,7 +626,12 @@ const ApplicationProxyPage = () => {
               disabled={configurationDisabled}
               onClick={() =>
                 run(async () => {
-                  await refreshInstalled()
+                  await refreshProxyApplications()
+                  await Promise.allSettled([
+                    refreshProcesses(),
+                    refreshClashConfig(),
+                    refreshRules(),
+                  ])
                 })
               }
             >

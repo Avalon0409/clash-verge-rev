@@ -32,6 +32,24 @@ pub async fn update_application_proxy(change: crate::config::application_proxy::
     Ok(())
 }
 
+pub async fn remove_missing_proxy_applications() -> Result<()> {
+    let config_write = Config::try_lock_config_write()?;
+    let mut settings = Config::verge()
+        .await
+        .data_arc()
+        .application_proxy
+        .clone()
+        .unwrap_or_default();
+    if !settings.remove_missing_applications().await? {
+        return Ok(());
+    }
+    let patch = IVerge {
+        application_proxy: Some(settings),
+        ..IVerge::default()
+    };
+    apply_verge_patch_locked(&config_write, &patch, false).await
+}
+
 pub async fn patch_clash(patch: &Mapping) -> Result<()> {
     let config_write = Config::try_lock_config_write()?;
     if let Some(mode) = patch.get("mode").and_then(serde_yaml_ng::Value::as_str) {

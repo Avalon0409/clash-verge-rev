@@ -37,6 +37,7 @@ import { useVerge } from '@/hooks/use-verge'
 import { entry_lightweight_mode } from '@/services/cmds'
 import { mutate } from '@/services/mutate'
 import { showNotice } from '@/services/notice-service'
+import { PROJECT_DOCUMENTATION_URL } from '@/services/project-info'
 import { openExternalUrl } from '@/utils/open-external-url'
 
 const preloadTestCard = () =>
@@ -244,9 +245,7 @@ const HomePage = () => {
 
   // 文档链接函数
   const toGithubDoc = useLockFn(() =>
-    openExternalUrl('https://clash-verge-rev.github.io/index.html').catch(
-      showNotice.error,
-    ),
+    openExternalUrl(PROJECT_DOCUMENTATION_URL).catch(showNotice.error),
   )
 
   // 新增：打开设置弹窗

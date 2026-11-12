@@ -15,7 +15,7 @@ on:
       - .github/workflows/pr-ai-slop-review.md
       - .github/workflows/docs-consistency.yml
   push:
-    branches: [dev]
+    branches: [main]
     paths:
       - CONTRIBUTING.md
       - AGENTS.md

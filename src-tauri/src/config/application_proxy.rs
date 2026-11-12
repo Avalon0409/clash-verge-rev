@@ -102,6 +102,23 @@ pub enum ApplicationProxyChange {
 }
 
 impl ApplicationProxyConfig {
+    pub async fn remove_missing_applications(&mut self) -> Result<bool> {
+        let mut applications = Vec::with_capacity(self.applications.len());
+        for application in &self.applications {
+            if tokio::fs::try_exists(application.path.as_str())
+                .await
+                .with_context(|| format!("Unable to inspect application {}", application.name))?
+            {
+                applications.push(application.clone());
+            }
+        }
+        let changed = applications.len() != self.applications.len();
+        if changed {
+            self.applications = applications;
+        }
+        Ok(changed)
+    }
+
     pub fn apply_change(&mut self, change: ApplicationProxyChange) -> Result<()> {
         match change {
             ApplicationProxyChange::SetMode { enabled } => self.enabled = enabled,
@@ -261,6 +278,47 @@ mod tests {
     } else {
         "/usr/local/bin/editor"
     };
+
+    #[tokio::test]
+    async fn missing_application_cleanup_preserves_existing_settings_and_inspection_errors() -> Result<()> {
+        let executable = std::env::current_exe()?;
+        let missing = executable.with_file_name(format!(
+            "missing-application-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_nanos()
+        ));
+        let existing = ApplicationProxyEntry {
+            name: "Existing".into(),
+            path: executable.to_str().context("test executable path")?.into(),
+            kind: ApplicationMatchKind::Executable,
+            enabled: true,
+            routing_mode: ApplicationRoutingMode::Proxy,
+            proxy: Some(format!("{}Exit", subscription_prefix("B")).into()),
+            profile_uid: Some("B".into()),
+        };
+        let mut removed = existing.clone();
+        removed.path = missing.to_str().context("missing application path")?.into();
+        let mut config = ApplicationProxyConfig {
+            enabled: true,
+            applications: vec![existing.clone(), removed.clone()],
+        };
+        assert!(config.remove_missing_applications().await?);
+        assert!(config.enabled);
+        assert_eq!(
+            serde_yaml_ng::to_string(&config.applications)?,
+            serde_yaml_ng::to_string(&vec![existing])?
+        );
+        assert!(!config.remove_missing_applications().await?);
+
+        config.applications.push(removed.clone());
+        removed.path = format!("{}\0", removed.path).into();
+        config.applications.push(removed);
+        let original = serde_yaml_ng::to_string(&config)?;
+        assert!(config.remove_missing_applications().await.is_err());
+        assert_eq!(serde_yaml_ng::to_string(&config)?, original);
+        Ok(())
+    }
 
     #[test]
     fn node_binding_must_belong_to_its_subscription() -> Result<()> {

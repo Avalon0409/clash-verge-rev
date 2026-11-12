@@ -7,6 +7,18 @@ import { mutate } from './mutate'
 export const listProxyApplications = () =>
   invoke<IProxyApplication[]>('list_proxy_applications')
 
+export const refreshProxyApplications = () =>
+  mutate(() => invoke<void>('remove_missing_proxy_applications'), {
+    id: 'patch-verge-config',
+    revalidate: [
+      ['listProxyApplications'],
+      ['getVergeConfig'],
+      ['getRuntimeConfig'],
+      ['getClashMode'],
+    ],
+    errorNotice: false,
+  })
+
 export const getApplicationProcesses = () =>
   invoke<IApplicationProcessSnapshot>('get_application_processes')
 
