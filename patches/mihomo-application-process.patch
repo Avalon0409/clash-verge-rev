@@ -137,10 +137,10 @@ index 0000000..0d717e6
 +func ResolveRouteInterface(destination netip.Addr, excluded string) *Interface { return nil }
 diff --git a/component/iface/route_windows.go b/component/iface/route_windows.go
 new file mode 100644
-index 0000000..fe6eb1f
+index 0000000..77d08af
 --- /dev/null
 +++ b/component/iface/route_windows.go
-@@ -0,0 +1,87 @@
+@@ -0,0 +1,107 @@
 +package iface
 +
 +import (
@@ -157,6 +157,7 @@ index 0000000..fe6eb1f
 +
 +var ipHelper = syscall.NewLazyDLL("iphlpapi.dll")
 +var getIPForwardTable = ipHelper.NewProc("GetIpForwardTable2")
++var getIPInterfaceEntry = ipHelper.NewProc("GetIpInterfaceEntry")
 +var freeMIBTable = ipHelper.NewProc("FreeMibTable")
 +var routeCache = singledo.NewSingle[[]ipForwardRow](time.Second)
 +
@@ -201,8 +202,24 @@ index 0000000..fe6eb1f
 +	if err != nil {
 +		return nil
 +	}
++	metrics := make(map[[2]uint32]uint32)
++	return selectRouteInterface(rows, interfaces, destination, excluded, func(family uint16, index uint32) uint32 {
++		key := [2]uint32{uint32(family), index}
++		if metric, ok := metrics[key]; ok {
++			return metric
++		}
++		entry := windows.MibIpInterfaceRow{Family: family, InterfaceIndex: index}
++		if status, _, _ := getIPInterfaceEntry.Call(uintptr(unsafe.Pointer(&entry))); status != 0 {
++			return 0
++		}
++		metrics[key] = entry.Metric
++		return entry.Metric
++	})
++}
++
++func selectRouteInterface(rows []ipForwardRow, interfaces map[string]*Interface, destination netip.Addr, excluded string, interfaceMetric func(uint16, uint32) uint32) *Interface {
 +	var best *Interface
-+	bestBits, bestMetric := -1, uint32(^uint32(0))
++	bestBits, bestMetric := -1, ^uint64(0)
 +	for _, row := range rows {
 +		var network netip.Addr
 +		switch row.Destination.Address.Family {
@@ -215,13 +232,16 @@ index 0000000..fe6eb1f
 +		default:
 +			continue
 +		}
-+		bits, metric := int(row.Destination.Length), row.Metric
-+		if network.Is4() != destination.Is4() || bits < bestBits || bits == bestBits && metric >= bestMetric || !netip.PrefixFrom(network, bits).Contains(destination) {
++		bits := int(row.Destination.Length)
++		if network.Is4() != destination.Is4() || bits < bestBits || !netip.PrefixFrom(network, bits).Contains(destination) {
 +			continue
 +		}
 +		for _, iface := range interfaces {
 +			if uint32(iface.Index) == row.Index && iface.Name != excluded && iface.Flags&net.FlagLoopback == 0 && iface.Flags&net.FlagUp != 0 {
-+				best, bestBits, bestMetric = iface, bits, metric
++				metric := uint64(row.Metric) + uint64(interfaceMetric(row.Destination.Address.Family, row.Index))
++				if bits > bestBits || metric < bestMetric {
++					best, bestBits, bestMetric = iface, bits, metric
++				}
 +				break
 +			}
 +		}
@@ -546,10 +566,10 @@ index 6ab0fef..340d759 100644
  type searcher struct {
 diff --git a/component/resolver/application_dns.go b/component/resolver/application_dns.go
 new file mode 100644
-index 0000000..d9eb450
+index 0000000..ba7677d
 --- /dev/null
 +++ b/component/resolver/application_dns.go
-@@ -0,0 +1,118 @@
+@@ -0,0 +1,131 @@
 +package resolver
 +
 +import (
@@ -565,9 +585,11 @@ index 0000000..d9eb450
 +
 +type ApplicationResolvers struct {
 +	Resolver
-+	Proxy  Resolver
-+	Direct Resolver
-+	Hosts  *Hosts
++	Proxy   Resolver
++	Direct  Resolver
++	Hosts   *Hosts
++	profile string
++	proxy   string
 +}
 +
 +type applicationDNSContextKey struct{}
@@ -594,16 +616,27 @@ index 0000000..d9eb450
 +	return (*values)[profile].Resolver
 +}
 +
-+func WithApplicationDNS(ctx context.Context, profile string) context.Context {
++func WithApplicationDNS(ctx context.Context, profile string, proxy ...string) context.Context {
 +	if profile == SystemDNSProfile {
 +		return context.WithValue(ctx, applicationDNSContextKey{}, ApplicationResolvers{Resolver: SystemResolver, Proxy: SystemResolver, Direct: SystemResolver})
 +	}
 +	if values := applicationDNS.Load(); values != nil {
 +		if r, ok := (*values)[profile]; ok {
++			r.profile = profile
++			if len(proxy) != 0 {
++				r.proxy = proxy[0]
++			}
 +			return context.WithValue(ctx, applicationDNSContextKey{}, r)
 +		}
 +	}
 +	return ctx
++}
++
++func ApplicationDNSRoute(ctx context.Context) (profile, proxy string) {
++	if selected, ok := ctx.Value(applicationDNSContextKey{}).(ApplicationResolvers); ok && selected.profile != GlobalDNSProfile {
++		return selected.profile, selected.proxy
++	}
++	return "", ""
 +}
 +
 +func applicationResolver(ctx context.Context, r Resolver) Resolver {
@@ -790,7 +823,7 @@ index e87a910..4f0c28b 100644
  		go DefaultResolver.ResetConnection()
  	}
 diff --git a/constant/metadata.go b/constant/metadata.go
-index 76d1e0e..741e727 100644
+index 76d1e0e..0289e40 100644
 --- a/constant/metadata.go
 +++ b/constant/metadata.go
 @@ -1,11 +1,13 @@
@@ -807,7 +840,7 @@ index 76d1e0e..741e727 100644
  )
  
  // SOCKS address types as defined in RFC 1928 section 5.
-@@ -187,31 +189,43 @@ func (t Type) MarshalJSON() ([]byte, error) {
+@@ -187,31 +189,44 @@ func (t Type) MarshalJSON() ([]byte, error) {
  }
  
  // Metadata is used to store connection address
@@ -868,6 +901,7 @@ index 76d1e0e..741e727 100644
 +	ApplicationRuleProxy  string            `json:"-"`
 +	ApplicationRuleSet    string            `json:"-"`
 +	ApplicationDNSProfile string            `json:"dnsProfile,omitempty"`
++	ApplicationDNSProxy   string            `json:"-"`
 +	SpecialProxy          string            `json:"specialProxy"`
 +	SpecialRules          string            `json:"specialRules"`
 +	RemoteDst             string            `json:"remoteDestination"`
@@ -875,7 +909,7 @@ index 76d1e0e..741e727 100644
  
  	RawSrcAddr net.Addr `json:"-"`
  	RawDstAddr net.Addr `json:"-"`
-@@ -374,3 +388,16 @@ func (m *Metadata) SwapSrcDst() {
+@@ -374,3 +389,16 @@ func (m *Metadata) SwapSrcDst() {
  	m.SrcIPASN, m.DstIPASN = m.DstIPASN, m.SrcIPASN
  	m.SrcGeoIP, m.DstGeoIP = m.DstGeoIP, m.SrcGeoIP
  }
@@ -1045,10 +1079,10 @@ index 1962a1e..340b8e1 100644
  	}
 diff --git a/rules/common/application_process.go b/rules/common/application_process.go
 new file mode 100644
-index 0000000..5bd5741
+index 0000000..c959760
 --- /dev/null
 +++ b/rules/common/application_process.go
-@@ -0,0 +1,173 @@
+@@ -0,0 +1,175 @@
 +package common
 +
 +import (
@@ -1107,6 +1141,7 @@ index 0000000..5bd5741
 +		return true, "REJECT"
 +	}
 +	metadata.ApplicationDNSProfile = rules
++	metadata.ApplicationDNSProxy = proxy
 +	if rules == "" {
 +		metadata.ApplicationDNSProfile = resolver.GlobalDNSProfile
 +	}
@@ -1153,6 +1188,7 @@ index 0000000..5bd5741
 +	metadata.ApplicationRuleProxy = ""
 +	metadata.ApplicationRuleSet = ""
 +	metadata.ApplicationDNSProfile = ""
++	metadata.ApplicationDNSProxy = ""
 +	if r.TunOnly && metadata.Type != C.TUN {
 +		metadata.ApplicationDNSProfile = resolver.GlobalDNSProfile
 +		return r.globalFallback()
@@ -1422,7 +1458,7 @@ index 474d01e..f9e3cf2 100644
  		parsed = RC.NewDomain(payload, target)
  	case "DOMAIN-SUFFIX":
 diff --git a/tunnel/tunnel.go b/tunnel/tunnel.go
-index 86dbc14..a9d9770 100644
+index 86dbc14..2939e2d 100644
 --- a/tunnel/tunnel.go
 +++ b/tunnel/tunnel.go
 @@ -335,10 +335,15 @@ func resolveMetadata(metadata *C.Metadata) (proxy C.Proxy, rule C.Rule, err erro
@@ -1432,7 +1468,7 @@ index 86dbc14..a9d9770 100644
 -			if !resolved && metadata.Host != "" && !metadata.Resolved() {
 +			if !resolved && metadata.Host != "" && (!metadata.Resolved() || resolver.ApplicationDNS(metadata.ApplicationDNSProfile) != nil) {
  				ctx, cancel := context.WithTimeout(context.Background(), resolver.DefaultDNSTimeout)
-+				ctx = resolver.WithApplicationDNS(ctx, metadata.ApplicationDNSProfile)
++				ctx = resolver.WithApplicationDNS(ctx, metadata.ApplicationDNSProfile, metadata.ApplicationDNSProxy)
  				defer cancel()
 -				ip, err := resolver.ResolveIP(ctx, metadata.Host)
 +				r := resolver.ApplicationDNS(metadata.ApplicationDNSProfile)
@@ -1470,7 +1506,7 @@ index 86dbc14..a9d9770 100644
  	}
 +	if r := resolver.ApplicationDNS(metadata.ApplicationDNSProfile); err == nil && r != nil && metadata.Host != "" && proxy != nil && proxy.Name() != "REJECT" {
 +		ctx, cancel := context.WithTimeout(context.Background(), resolver.DefaultDNSTimeout)
-+		ctx = resolver.WithApplicationDNS(ctx, metadata.ApplicationDNSProfile)
++		ctx = resolver.WithApplicationDNS(ctx, metadata.ApplicationDNSProfile, metadata.ApplicationDNSProxy)
 +		defer cancel()
 +		metadata.DstIP, err = resolver.ResolveIPWithResolver(ctx, metadata.Host, r)
 +		if err != nil {
@@ -1485,7 +1521,7 @@ index 86dbc14..a9d9770 100644
  
  			dialMetadata := metadata.Pure()
  			ctx, cancel := context.WithTimeout(context.Background(), C.DefaultUDPTimeout)
-+			ctx = resolver.WithApplicationDNS(ctx, metadata.ApplicationDNSProfile)
++			ctx = resolver.WithApplicationDNS(ctx, metadata.ApplicationDNSProfile, metadata.ApplicationDNSProxy)
  			defer cancel()
  			rawPc, err := retry(ctx, func(ctx context.Context) (C.PacketConn, error) {
  				return proxy.ListenPacketContext(ctx, dialMetadata)
@@ -1502,7 +1538,7 @@ index 86dbc14..a9d9770 100644
  	var peekLen int
  
  	ctx, cancel := context.WithTimeout(context.Background(), C.DefaultTCPTimeout)
-+	ctx = resolver.WithApplicationDNS(ctx, metadata.ApplicationDNSProfile)
++	ctx = resolver.WithApplicationDNS(ctx, metadata.ApplicationDNSProfile, metadata.ApplicationDNSProxy)
  	defer cancel()
  	remoteConn, err := retry(ctx, func(ctx context.Context) (remoteConn C.Conn, err error) {
  		remoteConn, err = proxy.DialContext(ctx, dialMetadata)
@@ -1605,6 +1641,7 @@ index 86dbc14..a9d9770 100644
  		if rematchProxy != nil {
  			if slices.Contains(rematchChain, rematchProxy.Name()) {
 diff --git a/config/config.go b/config/config.go
+index 707114a..6573db8 100644
 --- a/config/config.go
 +++ b/config/config.go
 @@ -193,24 +193,26 @@ type TLS struct {
@@ -1731,3 +1768,256 @@ diff --git a/config/config.go b/config/config.go
  
  	err = parseTun(rawCfg.Tun, dnsCfg, config.General)
  	if err != nil {
+diff --git a/component/iface/route_windows_test.go b/component/iface/route_windows_test.go
+new file mode 100644
+index 0000000..68b76e5
+--- /dev/null
++++ b/component/iface/route_windows_test.go
+@@ -0,0 +1,37 @@
++package iface
++
++import (
++	"encoding/binary"
++	"net"
++	"net/netip"
++	"testing"
++
++	"golang.org/x/sys/windows"
++)
++
++func TestNativeWindowsRouteUsesInterfaceMetric(t *testing.T) {
++	rows := []ipForwardRow{
++		{Index: 1, Destination: ipAddressPrefix{Address: windows.RawSockaddrInet6{Family: windows.AF_INET}}},
++		{Index: 2, Destination: ipAddressPrefix{Address: windows.RawSockaddrInet6{Family: windows.AF_INET}}},
++		{Index: 3, Metric: 5, Destination: ipAddressPrefix{Address: windows.RawSockaddrInet6{Family: windows.AF_INET}}},
++	}
++	interfaces := map[string]*Interface{
++		"Mihomo":   {Index: 1, Name: "Mihomo", Flags: net.FlagUp},
++		"Ethernet": {Index: 2, Name: "Ethernet", Flags: net.FlagUp},
++		"Wi-Fi":    {Index: 3, Name: "Wi-Fi", Flags: net.FlagUp},
++	}
++	metrics := map[uint32]uint32{1: 0, 2: 80, 3: 10}
++	metric := func(_ uint16, index uint32) uint32 { return metrics[index] }
++	got := selectRouteInterface(rows, interfaces, netip.MustParseAddr("1.1.1.1"), "Mihomo", metric)
++	if got == nil || got.Name != "Wi-Fi" {
++		t.Fatalf("expected lowest combined metric on a native interface, got %v", got)
++	}
++	address := netip.MustParseAddr("203.0.113.0").As4()
++	rows = append(rows, ipForwardRow{Index: 2, Metric: 500, Destination: ipAddressPrefix{
++		Address: windows.RawSockaddrInet6{Family: windows.AF_INET, Flowinfo: binary.LittleEndian.Uint32(address[:])}, Length: 24,
++	}})
++	got = selectRouteInterface(rows, interfaces, netip.MustParseAddr("203.0.113.1"), "Mihomo", metric)
++	if got == nil || got.Name != "Ethernet" {
++		t.Fatalf("the longest native route must win before metrics, got %v", got)
++	}
++}
+diff --git a/dns/application_context_test.go b/dns/application_context_test.go
+new file mode 100644
+index 0000000..b25f8f0
+--- /dev/null
++++ b/dns/application_context_test.go
+@@ -0,0 +1,40 @@
++package dns
++
++import (
++	"context"
++	"net"
++	"testing"
++
++	D "github.com/miekg/dns"
++)
++
++type applicationContextKey struct{}
++
++type applicationContextClient struct {
++	dnsClient
++	seen any
++}
++
++func (c *applicationContextClient) Address() string { return "application-context-test" }
++func (c *applicationContextClient) ExchangeContext(ctx context.Context, query *D.Msg) (*D.Msg, error) {
++	c.seen = ctx.Value(applicationContextKey{})
++	reply := new(D.Msg)
++	reply.SetReply(query)
++	reply.Answer = []D.RR{&D.A{
++		Hdr: D.RR_Header{Name: query.Question[0].Name, Rrtype: D.TypeA, Class: D.ClassINET, Ttl: 60},
++		A:   net.IPv4(192, 0, 2, 1),
++	}}
++	return reply, nil
++}
++
++func TestApplicationDNSContextSurvivesSingleflight(t *testing.T) {
++	client := &applicationContextClient{}
++	r := NewResolverFromClient(client)
++	ctx := context.WithValue(context.Background(), applicationContextKey{}, "selected-subscription")
++	if _, err := r.LookupIPv4(ctx, "application.example"); err != nil {
++		t.Fatal(err)
++	}
++	if client.seen != "selected-subscription" {
++		t.Fatalf("DNS transport lost application context: %v", client.seen)
++	}
++}
+diff --git a/dns/resolver.go b/dns/resolver.go
+index b8742f2..8b79dbe 100644
+--- a/dns/resolver.go
++++ b/dns/resolver.go
+@@ -157,7 +157,7 @@ func (r *Resolver) ExchangeContext(ctx context.Context, m *D.Msg) (msg *D.Msg, e
+ 	defer func() {
+ 		if continueFetch || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+ 			go func() {
+-				ctx, cancel := context.WithTimeout(context.Background(), resolver.DefaultDNSTimeout)
++				ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), resolver.DefaultDNSTimeout)
+ 				defer cancel()
+ 				_, _ = r.exchangeWithoutCache(ctx, m) // ignore result, just for putMsgToCache
+ 			}()
+@@ -189,7 +189,7 @@ func (r *Resolver) exchangeWithoutCache(ctx context.Context, m *D.Msg) (msg *D.M
+ 	retryNum := 0
+ 	retryMax := 3
+ 	fn := func() (result *D.Msg, err error) {
+-		ctx, cancel := context.WithTimeout(context.Background(), resolver.DefaultDNSTimeout) // reset timeout in singleflight
++		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), resolver.DefaultDNSTimeout) // reset timeout in singleflight
+ 		defer cancel()
+ 		cache := false
+ 
+diff --git a/rules/provider/ipcidr_strategy.go b/rules/provider/ipcidr_strategy.go
+index 78a56cb..4c70f80 100644
+--- a/rules/provider/ipcidr_strategy.go
++++ b/rules/provider/ipcidr_strategy.go
+@@ -4,6 +4,7 @@ import (
+ 	"errors"
+ 	"io"
+ 	"net/netip"
++	"strings"
+ 
+ 	"github.com/metacubex/mihomo/component/cidr"
+ 	C "github.com/metacubex/mihomo/constant"
+@@ -42,6 +43,11 @@ func (i *ipcidrStrategy) Reset() {
+ }
+ 
+ func (i *ipcidrStrategy) Insert(rule string) {
++	fields := strings.Split(rule, ",")
++	if (len(fields) == 2 || len(fields) == 3 && strings.TrimSpace(fields[2]) == "no-resolve") &&
++		(strings.TrimSpace(fields[0]) == "IP-CIDR" || strings.TrimSpace(fields[0]) == "IP-CIDR6") {
++		rule = strings.TrimSpace(fields[1])
++	}
+ 	//err := i.trie.AddIpCidrForString(rule)
+ 	err := i.cidrSet.AddIpCidrForString(rule)
+ 	if err != nil {
+diff --git a/rules/provider/ipcidr_strategy_test.go b/rules/provider/ipcidr_strategy_test.go
+new file mode 100644
+index 0000000..4beeba6
+--- /dev/null
++++ b/rules/provider/ipcidr_strategy_test.go
+@@ -0,0 +1,27 @@
++package provider_test
++
++import (
++	"net/netip"
++	"testing"
++
++	C "github.com/metacubex/mihomo/constant"
++	"github.com/metacubex/mihomo/rules/provider"
++)
++
++func TestIPCidrStrategyAcceptsClassicalCIDRs(t *testing.T) {
++	for _, test := range []struct{ rule, address string }{
++		{"192.0.2.0/24", "192.0.2.1"},
++		{"IP-CIDR,192.0.2.0/24,no-resolve", "192.0.2.1"},
++		{"IP-CIDR6,2001:db8::/32,no-resolve", "2001:db8::1"},
++	} {
++		t.Run(test.rule, func(t *testing.T) {
++			strategy := provider.NewIPCidrStrategy()
++			strategy.Reset()
++			strategy.Insert(test.rule)
++			strategy.FinishInsert()
++			if strategy.Count() != 1 || !strategy.Match(&C.Metadata{DstIP: netip.MustParseAddr(test.address)}, C.RuleMatchHelper{}) {
++				t.Fatalf("CIDR was discarded: %s", test.rule)
++			}
++		})
++	}
++}
+diff --git a/tunnel/application_dns_test.go b/tunnel/application_dns_test.go
+new file mode 100644
+index 0000000..34766ec
+--- /dev/null
++++ b/tunnel/application_dns_test.go
+@@ -0,0 +1,59 @@
++package tunnel
++
++import (
++	"context"
++	"errors"
++	"testing"
++
++	"github.com/metacubex/mihomo/component/resolver"
++	C "github.com/metacubex/mihomo/constant"
++	"github.com/metacubex/mihomo/rules/common"
++)
++
++type applicationDNSProbe struct {
++	C.Proxy
++	name   string
++	called bool
++}
++
++func (p *applicationDNSProbe) Name() string                     { return p.name }
++func (p *applicationDNSProbe) Type() C.AdapterType              { return C.Socks5 }
++func (p *applicationDNSProbe) Unwrap(*C.Metadata, bool) C.Proxy { return nil }
++func (p *applicationDNSProbe) IsL3Protocol(*C.Metadata) bool    { return false }
++func (p *applicationDNSProbe) DialContext(context.Context, *C.Metadata) (C.Conn, error) {
++	p.called = true
++	return nil, errors.New("DNS route probe")
++}
++
++type applicationDNSResolver struct{ resolver.Resolver }
++
++func (*applicationDNSResolver) ResetConnection() {}
++
++func TestApplicationDNSRespectRulesUsesSubscription(t *testing.T) {
++	oldRules, oldSubRules, oldProxies, oldMode := rules, subRules, proxies, mode
++	t.Cleanup(func() {
++		rules, subRules, proxies, mode = oldRules, oldSubRules, oldProxies, oldMode
++		resolver.SetApplicationDNS(nil)
++	})
++	global := &applicationDNSProbe{name: "global"}
++	subscription := &applicationDNSProbe{name: "subscription"}
++	selected := &applicationDNSProbe{name: "selected"}
++	proxies = map[string]C.Proxy{"global": global, "subscription": subscription, "selected": selected}
++	rules = []C.Rule{common.NewMatch("global")}
++	subRules = map[string][]C.Rule{"application-dns": {common.NewMatch("subscription")}}
++	mode = Rule
++	resolver.SetApplicationDNS(map[string]resolver.ApplicationResolvers{
++		"application-dns": {Resolver: &applicationDNSResolver{}},
++	})
++	ctx := resolver.WithApplicationDNS(context.Background(), "application-dns")
++	_, _ = NewDNSDialer(nil, nil, DnsRespectRules).DialContext(ctx, "tcp", "192.0.2.53:53")
++	if global.called || !subscription.called {
++		t.Fatalf("DNS used the wrong route: global=%v subscription=%v", global.called, subscription.called)
++	}
++	subscription.called = false
++	ctx = resolver.WithApplicationDNS(context.Background(), "application-dns", "selected")
++	_, _ = NewDNSDialer(nil, nil, DnsRespectRules).DialContext(ctx, "tcp", "192.0.2.53:53")
++	if global.called || subscription.called || !selected.called {
++		t.Fatal("subscription DNS must use the application's selected proxy")
++	}
++}
+diff --git a/tunnel/dns_dialer.go b/tunnel/dns_dialer.go
+index c409a29..53c9876 100644
+--- a/tunnel/dns_dialer.go
++++ b/tunnel/dns_dialer.go
+@@ -63,6 +63,7 @@ func (d *DNSDialer) DialContext(ctx context.Context, network, addr string) (net.
+ 				}
+ 				metadata.DstIP = dstIP
+ 			}
++			metadata.SpecialRules, metadata.ApplicationRuleProxy = resolver.ApplicationDNSRoute(ctx)
+ 			proxyAdapter, rule, err = resolveMetadata(metadata)
+ 			if err != nil {
+ 				return nil, err
+@@ -153,6 +154,7 @@ func (d *DNSDialer) ListenPacket(ctx context.Context, network, addr string) (net
+ 	var rule C.Rule
+ 	if proxyAdapter == nil {
+ 		if proxyName == DnsRespectRules {
++			metadata.SpecialRules, metadata.ApplicationRuleProxy = resolver.ApplicationDNSRoute(ctx)
+ 			proxyAdapter, rule, err = resolveMetadata(metadata)
+ 			if err != nil {
+ 				return nil, err
