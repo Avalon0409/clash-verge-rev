@@ -1488,7 +1488,7 @@ index 474d01e..f9e3cf2 100644
  		parsed = RC.NewDomain(payload, target)
  	case "DOMAIN-SUFFIX":
 diff --git a/tunnel/tunnel.go b/tunnel/tunnel.go
-index 86dbc14..2939e2d 100644
+index 86dbc14..d9caa78 100644
 --- a/tunnel/tunnel.go
 +++ b/tunnel/tunnel.go
 @@ -335,10 +335,15 @@ func resolveMetadata(metadata *C.Metadata) (proxy C.Proxy, rule C.Rule, err erro
@@ -1547,7 +1547,14 @@ index 86dbc14..2939e2d 100644
  	return
  }
  
-@@ -465,6 +483,7 @@ func handleUDPConn(packet C.PacketAdapter) {
+@@ -459,12 +477,13 @@ func handleUDPConn(packet C.PacketAdapter) {
+ 
+ 			proxy, rule, err := resolveMetadata(metadata)
+ 			if err != nil {
+-				log.Warnln("[UDP] Parse metadata failed: %s", err.Error())
++				log.Warnln("[UDP] Parse metadata failed: %s; source=%s destination=%s dns-profile=%s", err.Error(), metadata.SourceDetail(), metadata.RemoteAddress(), metadata.ApplicationDNSProfile)
+ 				return nil, nil, err
+ 			}
  
  			dialMetadata := metadata.Pure()
  			ctx, cancel := context.WithTimeout(context.Background(), C.DefaultUDPTimeout)
@@ -1555,7 +1562,12 @@ index 86dbc14..2939e2d 100644
  			defer cancel()
  			rawPc, err := retry(ctx, func(ctx context.Context) (C.PacketConn, error) {
  				return proxy.ListenPacketContext(ctx, dialMetadata)
-@@ -557,7 +576,7 @@ func handleTCPConn(connCtx C.ConnContext) {
+@@ -553,11 +572,11 @@ func handleTCPConn(connCtx C.ConnContext) {
+ 
+ 	proxy, rule, err := resolveMetadata(metadata)
+ 	if err != nil {
+-		log.Warnln("[Metadata] parse failed: %s", err.Error())
++		log.Warnln("[Metadata] parse failed: %s; source=%s destination=%s dns-profile=%s", err.Error(), metadata.SourceDetail(), metadata.RemoteAddress(), metadata.ApplicationDNSProfile)
  		return
  	}
  
@@ -1671,14 +1683,23 @@ index 86dbc14..2939e2d 100644
  		if rematchProxy != nil {
  			if slices.Contains(rematchChain, rematchProxy.Name()) {
 diff --git a/component/fakeip/pool.go b/component/fakeip/pool.go
-index 0417e20..5bed5a7 100644
+index 0417e20..b3d22e1 100644
 --- a/component/fakeip/pool.go
 +++ b/component/fakeip/pool.go
-@@ -88,7 +88,18 @@ func (p *Pool) IPNet() netip.Prefix {
+@@ -52,6 +52,8 @@ func (p *Pool) Lookup(host string) netip.Addr {
+ 
+ 	ip := p.get(host)
+ 	p.store.PutByHost(host, ip)
++	// The Windows service can terminate the core without running Shutdown.
++	p.storeState()
+ 	return ip
+ }
+ 
+@@ -88,7 +90,17 @@ func (p *Pool) IPNet() netip.Prefix {
  
  // CloneFrom clone cache from old pool
  func (p *Pool) CloneFrom(o *Pool) {
-+	if p == o {
++	if p == o || p.ipnet.Masked() != o.ipnet.Masked() {
 +		return
 +	}
 +	o.mux.Lock()
@@ -1686,18 +1707,53 @@ index 0417e20..5bed5a7 100644
 +	p.mux.Lock()
 +	defer p.mux.Unlock()
  	o.store.CloneTo(p.store)
-+	if p.ipnet.Masked() == o.ipnet.Masked() {
-+		p.offset = o.offset
-+		p.cycle = o.cycle
-+	}
++	p.offset = o.offset
++	p.cycle = o.cycle
++	p.storeState()
  }
  
  func (p *Pool) get(host string) netip.Addr {
+@@ -117,6 +129,12 @@ func (p *Pool) FlushFakeIP() error {
+ }
+ 
+ func (p *Pool) StoreState() {
++	p.mux.Lock()
++	defer p.mux.Unlock()
++	p.storeState()
++}
++
++func (p *Pool) storeState() {
+ 	if s, ok := p.store.(*cachefileStore); ok {
+ 		s.PutByHost(offsetKey, p.offset)
+ 		if p.cycle {
+@@ -137,8 +155,12 @@ func (p *Pool) restoreState() {
+ 			} else {
+ 				_ = p.FlushFakeIP()
+ 			}
+-		} else if s.Exist(p.first) {
+-			_ = p.FlushFakeIP()
++		} else {
++			for _, ip := range s.cache.Mappings() {
++				if p.ipnet.Contains(ip) && p.offset.Less(ip) {
++					p.offset = ip
++				}
++			}
+ 		}
+ 	}
+ }
 diff --git a/component/fakeip/pool_test.go b/component/fakeip/pool_test.go
-index c445807..a240374 100644
+index c445807..ae4fdde 100644
 --- a/component/fakeip/pool_test.go
 +++ b/component/fakeip/pool_test.go
-@@ -212,6 +212,35 @@ func TestPool_Clone(t *testing.T) {
+@@ -4,6 +4,7 @@ import (
+ 	"fmt"
+ 	"net/netip"
+ 	"os"
++	"path/filepath"
+ 	"testing"
+ 	"time"
+ 
+@@ -212,6 +213,124 @@ func TestPool_Clone(t *testing.T) {
  	assert.True(t, lastExist)
  }
  
@@ -1730,11 +1786,272 @@ index c445807..a240374 100644
 +	}
 +}
 +
++func TestPoolPersistsBeforeShutdown(t *testing.T) {
++	for _, prefix := range []string{"198.18.0.1/28", "2001:2::/124"} {
++		t.Run(prefix, func(t *testing.T) {
++			options := Options{IPNet: netip.MustParsePrefix(prefix), Size: 64}
++			path := filepath.Join(t.TempDir(), "cache.db")
++			db, err := bbolt.Open(path, 0o600, nil)
++			if err != nil {
++				t.Fatal(err)
++			}
++			db.MaxBatchDelay = 0
++			t.Cleanup(func() { _ = db.Close() })
++			pool, _ := New(options)
++			pool.store = newCachefileStore(&cachefile.CacheFile{DB: db}, options.IPNet)
++			first := pool.Lookup("cached.example")
++			last := pool.Lookup("second.example")
++			if err := db.Close(); err != nil {
++				t.Fatal(err)
++			}
++			db, err = bbolt.Open(path, 0o600, nil)
++			if err != nil {
++				t.Fatal(err)
++			}
++			db.MaxBatchDelay = 0
++			restarted, _ := New(options)
++			restarted.store = newCachefileStore(&cachefile.CacheFile{DB: db}, options.IPNet)
++			restarted.restoreState()
++			if host, ok := restarted.LookBack(first); !ok || host != "cached.example" {
++				t.Fatal("a restart without StoreState lost an application-cached mapping")
++			}
++			if got := restarted.Lookup("after-restart.example"); got != last.Next() {
++				t.Fatalf("restart recycled an application-cached address: got %s, want %s", got, last.Next())
++			}
++		})
++	}
++}
++
++func TestPoolMigratesMemoryMappingsToPersistence(t *testing.T) {
++	options := Options{IPNet: netip.MustParsePrefix("198.18.0.1/24"), Size: 64}
++	old, _ := New(options)
++	first := old.Lookup("cached.example")
++	last := old.Lookup("second.example")
++	db, err := bbolt.Open(filepath.Join(t.TempDir(), "cache.db"), 0o600, nil)
++	if err != nil {
++		t.Fatal(err)
++	}
++	db.MaxBatchDelay = 0
++	t.Cleanup(func() { _ = db.Close() })
++	persistent, _ := New(options)
++	persistent.store = newCachefileStore(&cachefile.CacheFile{DB: db}, options.IPNet)
++	// A previous persistent session may disagree with the current memory pool.
++	persistent.Lookup("stale-disk.example")
++	persistent.Lookup("cached.example")
++	persistent.CloneFrom(old)
++	if host, ok := persistent.LookBack(first); !ok || host != "cached.example" {
++		t.Fatal("enabling persistence discarded the existing in-memory mappings")
++	}
++	if got := persistent.Lookup("after-migration.example"); got != last.Next() {
++		t.Fatalf("persistence migration reused an address: %s", got)
++	}
++	if _, exists := persistent.store.GetByHost("stale-disk.example"); exists {
++		t.Fatal("enabling persistence revived a stale mapping from a previous session")
++	}
++	memory, _ := New(options)
++	memory.CloneFrom(persistent)
++	if host, ok := memory.LookBack(first); !ok || host != "cached.example" {
++		t.Fatal("disabling persistence discarded a cached mapping")
++	}
++}
++
++func TestPoolRestoresLegacyMappingsWithoutCursor(t *testing.T) {
++	options := Options{IPNet: netip.MustParsePrefix("198.18.0.1/24"), Size: 64}
++	db, err := bbolt.Open(filepath.Join(t.TempDir(), "cache.db"), 0o600, nil)
++	if err != nil {
++		t.Fatal(err)
++	}
++	db.MaxBatchDelay = 0
++	t.Cleanup(func() { _ = db.Close() })
++	pool, _ := New(options)
++	store := newCachefileStore(&cachefile.CacheFile{DB: db}, options.IPNet)
++	ip := netip.MustParseAddr("198.18.0.115")
++	store.PutByHost("cached.example", ip)
++	store.PutByIP(ip, "cached.example")
++	pool.store = store
++	pool.restoreState()
++	if got := pool.Lookup("after-upgrade.example"); got != ip.Next() {
++		t.Fatalf("missing cursor restarted allocation in a cached address range: %s", got)
++	}
++}
++
  func TestPool_Error(t *testing.T) {
  	ipnet := netip.MustParsePrefix("192.168.0.1/31")
  	_, err := New(Options{
+diff --git a/common/lru/lrucache.go b/common/lru/lrucache.go
+index 4afe8e0..4bb0d16 100644
+--- a/common/lru/lrucache.go
++++ b/common/lru/lrucache.go
+@@ -186,6 +186,16 @@ func (c *LruCache[K, V]) setWithExpire(key K, value V, expires time.Time) {
+ 	c.maybeDeleteOldest()
+ }
+ 
++func (c *LruCache[K, V]) Snapshot() map[K]V {
++	c.mu.Lock()
++	defer c.mu.Unlock()
++	values := make(map[K]V, len(c.cache))
++	for key, element := range c.cache {
++		values[key] = element.Value.value
++	}
++	return values
++}
++
+ // CloneTo clone and overwrite elements to another LruCache
+ func (c *LruCache[K, V]) CloneTo(n *LruCache[K, V]) {
+ 	c.mu.Lock()
+diff --git a/component/fakeip/cachefile.go b/component/fakeip/cachefile.go
+index 2ebb0d5..020b1a3 100644
+--- a/component/fakeip/cachefile.go
++++ b/component/fakeip/cachefile.go
+@@ -42,8 +42,15 @@ func (c *cachefileStore) Exist(ip netip.Addr) bool {
+ }
+ 
+ // CloneTo implements store.CloneTo
+-// already persistence
+-func (c *cachefileStore) CloneTo(store store) {}
++// Persistent-to-persistent pools share the same database.
++func (c *cachefileStore) CloneTo(store store) {
++	if memory, ok := store.(*memoryStore); ok {
++		for host, ip := range c.cache.Mappings() {
++			memory.PutByHost(host, ip)
++			memory.PutByIP(ip, host)
++		}
++	}
++}
+ 
+ // FlushFakeIP implements store.FlushFakeIP
+ func (c *cachefileStore) FlushFakeIP() error {
+diff --git a/component/fakeip/memory.go b/component/fakeip/memory.go
+index 0a8492f..2107a9d 100644
+--- a/component/fakeip/memory.go
++++ b/component/fakeip/memory.go
+@@ -57,11 +57,13 @@ func (m *memoryStore) Exist(ip netip.Addr) bool {
+ }
+ 
+ // CloneTo implements store.CloneTo
+-// only for memoryStore to memoryStore
++// Preserve live mappings when enabling persistence.
+ func (m *memoryStore) CloneTo(store store) {
+ 	if ms, ok := store.(*memoryStore); ok {
+ 		m.cacheIP.CloneTo(ms.cacheIP)
+ 		m.cacheHost.CloneTo(ms.cacheHost)
++	} else if fs, ok := store.(*cachefileStore); ok {
++		fs.cache.ReplaceMappings(m.cacheIP.Snapshot())
+ 	}
+ }
+ 
+diff --git a/component/profile/cachefile/fakeip.go b/component/profile/cachefile/fakeip.go
+index 5278132..2c2a483 100644
+--- a/component/profile/cachefile/fakeip.go
++++ b/component/profile/cachefile/fakeip.go
+@@ -1,6 +1,7 @@
+ package cachefile
+ 
+ import (
++	"bytes"
+ 	"net/netip"
+ 
+ 	"github.com/metacubex/mihomo/log"
+@@ -13,6 +14,55 @@ type FakeIpStore struct {
+ 	bucketName []byte
+ }
+ 
++func (c *FakeIpStore) Mappings() map[string]netip.Addr {
++	values := make(map[string]netip.Addr)
++	if c.DB == nil {
++		return values
++	}
++	_ = c.DB.View(func(t *bbolt.Tx) error {
++		if bucket := t.Bucket(c.bucketName); bucket != nil {
++			return bucket.ForEach(func(key, value []byte) error {
++				if ip, ok := netip.AddrFromSlice(value); ok && bytes.Equal(bucket.Get(ip.AsSlice()), key) {
++					values[string(key)] = ip
++				}
++				return nil
++			})
++		}
++		return nil
++	})
++	return values
++}
++
++// ReplaceMappings switches from a live memory pool without reviving stale disk entries.
++func (c *FakeIpStore) ReplaceMappings(values map[string]netip.Addr) {
++	if c.DB == nil {
++		return
++	}
++	err := c.DB.Batch(func(t *bbolt.Tx) error {
++		if t.Bucket(c.bucketName) != nil {
++			if err := t.DeleteBucket(c.bucketName); err != nil {
++				return err
++			}
++		}
++		bucket, err := t.CreateBucketIfNotExists(c.bucketName)
++		if err != nil {
++			return err
++		}
++		for host, ip := range values {
++			if err := bucket.Put([]byte(host), ip.AsSlice()); err != nil {
++				return err
++			}
++			if err := bucket.Put(ip.AsSlice(), []byte(host)); err != nil {
++				return err
++			}
++		}
++		return nil
++	})
++	if err != nil {
++		log.Warnln("[CacheFile] import fake-ip mappings failed: %s", err)
++	}
++}
++
+ func (c *CacheFile) FakeIpStore() *FakeIpStore {
+ 	return &FakeIpStore{c, bucketFakeip}
+ }
+diff --git a/config/application_dns_test.go b/config/application_dns_test.go
+new file mode 100644
+index 0000000..c875155
+--- /dev/null
++++ b/config/application_dns_test.go
+@@ -0,0 +1,36 @@
++package config
++
++import (
++	"testing"
++
++	"github.com/metacubex/mihomo/component/resolver"
++	C "github.com/metacubex/mihomo/constant"
++)
++
++func TestApplicationTUNPersistsFakeIPMappings(t *testing.T) {
++	for _, enabled := range []bool{false, true} {
++		raw := DefaultRawConfig()
++		raw.Tun.Enable = enabled
++		raw.DNS.Enable = true
++		raw.DNS.EnhancedMode = C.DNSFakeIP
++		raw.ApplicationDNS = map[string]map[string]any{resolver.GlobalDNSProfile: {"enable": true}}
++		profile, err := parseProfile(raw)
++		if err != nil {
++			t.Fatal(err)
++		}
++		if profile.StoreFakeIP != enabled || raw.Profile.StoreFakeIP != enabled {
++			t.Fatalf("app-only TUN persistence: tun=%v profile=%v raw=%v", enabled, profile.StoreFakeIP, raw.Profile.StoreFakeIP)
++		}
++	}
++	raw := DefaultRawConfig()
++	raw.Tun.Enable = true
++	raw.DNS.Enable = true
++	raw.DNS.EnhancedMode = C.DNSFakeIP
++	profile, err := parseProfile(raw)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if profile.StoreFakeIP {
++		t.Fatal("ordinary TUN persistence preference was changed")
++	}
++}
 diff --git a/config/config.go b/config/config.go
-index 707114a..6573db8 100644
+index 707114a..afd1b56 100644
 --- a/config/config.go
 +++ b/config/config.go
 @@ -193,24 +193,26 @@ type TLS struct {
@@ -1861,6 +2178,17 @@ index 707114a..6573db8 100644
  
  	err = parseTun(rawCfg.Tun, dnsCfg, config.General)
  	if err != nil {
+@@ -859,6 +890,10 @@ func parseNTP(cfg *RawConfig) (*NTP, error) {
+ }
+ 
+ func parseProfile(cfg *RawConfig) (*Profile, error) {
++	// Applications retain these addresses after the app-only TUN core is replaced.
++	if _, appTUN := cfg.ApplicationDNS[resolver.GlobalDNSProfile]; appTUN && cfg.Tun.Enable && cfg.DNS.Enable && cfg.DNS.EnhancedMode == C.DNSFakeIP {
++		cfg.Profile.StoreFakeIP = true
++	}
+ 	return &Profile{
+ 		StoreSelected: cfg.Profile.StoreSelected,
+ 		StoreFakeIP:   cfg.Profile.StoreFakeIP,
 diff --git a/component/iface/route_windows_test.go b/component/iface/route_windows_test.go
 new file mode 100644
 index 0000000..68b76e5
@@ -1906,17 +2234,21 @@ index 0000000..68b76e5
 +}
 diff --git a/dns/application_context_test.go b/dns/application_context_test.go
 new file mode 100644
-index 0000000..b25f8f0
+index 0000000..9557b74
 --- /dev/null
 +++ b/dns/application_context_test.go
-@@ -0,0 +1,40 @@
+@@ -0,0 +1,101 @@
 +package dns
 +
 +import (
 +	"context"
++	"errors"
 +	"net"
++	"strings"
 +	"testing"
++	"time"
 +
++	"github.com/metacubex/mihomo/component/resolver"
 +	D "github.com/miekg/dns"
 +)
 +
@@ -1950,11 +2282,148 @@ index 0000000..b25f8f0
 +		t.Fatalf("DNS transport lost application context: %v", client.seen)
 +	}
 +}
++
++type applicationNoAddressClient struct {
++	dnsClient
++	rcode int
++}
++
++func (c *applicationNoAddressClient) Address() string { return "no-address-test" }
++func (c *applicationNoAddressClient) ExchangeContext(_ context.Context, query *D.Msg) (*D.Msg, error) {
++	reply := new(D.Msg)
++	reply.SetRcode(query, c.rcode)
++	return reply, nil
++}
++
++func TestNoAddressErrorRetainsDNSDetails(t *testing.T) {
++	for _, rcode := range []int{D.RcodeNameError, D.RcodeSuccess} {
++		r := NewResolverFromClient(&applicationNoAddressClient{rcode: rcode})
++		_, err := r.LookupIP(context.Background(), "missing.application.example")
++		if !errors.Is(err, resolver.ErrIPNotFound) || !strings.Contains(err.Error(), "missing.application.example") ||
++			!strings.Contains(err.Error(), D.RcodeToString[rcode]) || !strings.Contains(err.Error(), "AAAA") {
++			t.Fatalf("lost the failed DNS name, response code or IP-family error: %v", err)
++		}
++	}
++}
++
++type applicationIPv6Client struct{ dnsClient }
++
++func (*applicationIPv6Client) Address() string { return "ipv6-only-test" }
++func (*applicationIPv6Client) ExchangeContext(ctx context.Context, query *D.Msg) (*D.Msg, error) {
++	reply := new(D.Msg)
++	reply.SetReply(query)
++	if query.Question[0].Qtype == D.TypeAAAA {
++		select {
++		case <-time.After(180 * time.Millisecond):
++		case <-ctx.Done():
++			return nil, ctx.Err()
++		}
++		reply.Answer = []D.RR{&D.AAAA{Hdr: D.RR_Header{Name: query.Question[0].Name, Rrtype: D.TypeAAAA, Class: D.ClassINET, Ttl: 60}, AAAA: net.ParseIP("2001:db8::1")}}
++	}
++	return reply, nil
++}
++
++func TestIPv4NoDataWaitsForIPv6WithinDeadline(t *testing.T) {
++	r := NewResolverFromClient(&applicationIPv6Client{})
++	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
++	defer cancel()
++	ips, err := r.LookupIP(ctx, "ipv6-only.application.example")
++	if err != nil || len(ips) != 1 || ips[0].String() != "2001:db8::1" {
++		t.Fatalf("IPv4 no-data discarded a valid delayed AAAA answer: %v %v", ips, err)
++	}
++	r = NewResolverFromClient(&applicationIPv6Client{})
++	short, stop := context.WithTimeout(context.Background(), 40*time.Millisecond)
++	defer stop()
++	_, err = r.LookupIP(short, "deadline.application.example")
++	if !errors.Is(err, context.DeadlineExceeded) {
++		t.Fatalf("waiting for AAAA must honor the caller deadline: %v", err)
++	}
++}
 diff --git a/dns/resolver.go b/dns/resolver.go
-index b8742f2..8b79dbe 100644
+index b8742f2..c95843a 100644
 --- a/dns/resolver.go
 +++ b/dns/resolver.go
-@@ -157,7 +157,7 @@ func (r *Resolver) ExchangeContext(ctx context.Context, m *D.Msg) (msg *D.Msg, e
+@@ -3,6 +3,7 @@ package dns
+ import (
+ 	"context"
+ 	"errors"
++	"fmt"
+ 	"net/netip"
+ 	"time"
+ 
+@@ -52,10 +53,12 @@ type Resolver struct {
+ 
+ func (r *Resolver) LookupIPPrimaryIPv4(ctx context.Context, host string) (ips []netip.Addr, err error) {
+ 	ch := make(chan []netip.Addr, 1)
++	var ipv6Err error
+ 	go func() {
+ 		defer close(ch)
+ 		ip, err := r.lookupIP(ctx, host, D.TypeAAAA)
+ 		if err != nil {
++			ipv6Err = err
+ 			return
+ 		}
+ 		ch <- ip
+@@ -68,7 +71,7 @@ func (r *Resolver) LookupIPPrimaryIPv4(ctx context.Context, host string) (ips []
+ 
+ 	ip, open := <-ch
+ 	if !open {
+-		return nil, resolver.ErrIPNotFound
++		return nil, fmt.Errorf("%w; AAAA lookup: %v", err, ipv6Err)
+ 	}
+ 
+ 	return ip, nil
+@@ -76,10 +79,12 @@ func (r *Resolver) LookupIPPrimaryIPv4(ctx context.Context, host string) (ips []
+ 
+ func (r *Resolver) LookupIP(ctx context.Context, host string) (ips []netip.Addr, err error) {
+ 	ch := make(chan []netip.Addr, 1)
++	var ipv6Err error
+ 	go func() {
+ 		defer close(ch)
+ 		ip, err := r.lookupIP(ctx, host, D.TypeAAAA)
+ 		if err != nil {
++			ipv6Err = err
+ 			return
+ 		}
+ 
+@@ -87,21 +92,28 @@ func (r *Resolver) LookupIP(ctx context.Context, host string) (ips []netip.Addr,
+ 	}()
+ 
+ 	ips, err = r.lookupIP(ctx, host, D.TypeA)
+-	var waitIPv6 *time.Timer
+-	if r != nil && r.ipv6Timeout > 0 {
+-		waitIPv6 = time.NewTimer(r.ipv6Timeout)
+-	} else {
+-		waitIPv6 = time.NewTimer(100 * time.Millisecond)
++	var waitIPv6 <-chan time.Time
++	if err == nil {
++		duration := 100 * time.Millisecond
++		if r != nil && r.ipv6Timeout > 0 {
++			duration = r.ipv6Timeout
++		}
++		timer := time.NewTimer(duration)
++		defer timer.Stop()
++		waitIPv6 = timer.C
+ 	}
+-	defer waitIPv6.Stop()
+ 	select {
+ 	case ipv6s, open := <-ch:
+ 		if !open && err != nil {
+-			return nil, resolver.ErrIPNotFound
++			return nil, fmt.Errorf("%w; AAAA lookup: %v", err, ipv6Err)
+ 		}
+ 		ips = append(ips, ipv6s...)
+-	case <-waitIPv6.C:
++	case <-waitIPv6:
+ 		// wait ipv6 result
++	case <-ctx.Done():
++		if len(ips) == 0 {
++			return nil, fmt.Errorf("%w: %s (A lookup: %v)", ctx.Err(), host, err)
++		}
+ 	}
+ 
+ 	return ips, nil
+@@ -157,7 +169,7 @@ func (r *Resolver) ExchangeContext(ctx context.Context, m *D.Msg) (msg *D.Msg, e
  	defer func() {
  		if continueFetch || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
  			go func() {
@@ -1963,7 +2432,7 @@ index b8742f2..8b79dbe 100644
  				defer cancel()
  				_, _ = r.exchangeWithoutCache(ctx, m) // ignore result, just for putMsgToCache
  			}()
-@@ -189,7 +189,7 @@ func (r *Resolver) exchangeWithoutCache(ctx context.Context, m *D.Msg) (msg *D.M
+@@ -189,7 +201,7 @@ func (r *Resolver) exchangeWithoutCache(ctx context.Context, m *D.Msg) (msg *D.M
  	retryNum := 0
  	retryMax := 3
  	fn := func() (result *D.Msg, err error) {
@@ -1972,6 +2441,15 @@ index b8742f2..8b79dbe 100644
  		defer cancel()
  		cache := false
  
+@@ -367,7 +379,7 @@ func (r *Resolver) lookupIP(ctx context.Context, host string, dnsType uint16) (i
+ 	ips = msgToIP(msg)
+ 	ipLength := len(ips)
+ 	if ipLength == 0 {
+-		return []netip.Addr{}, resolver.ErrIPNotFound
++		return []netip.Addr{}, fmt.Errorf("%w: %s %s response %s has no address", resolver.ErrIPNotFound, host, D.TypeToString[dnsType], D.RcodeToString[msg.Rcode])
+ 	}
+ 
+ 	return
 diff --git a/rules/provider/ipcidr_strategy.go b/rules/provider/ipcidr_strategy.go
 index 78a56cb..4c70f80 100644
 --- a/rules/provider/ipcidr_strategy.go
