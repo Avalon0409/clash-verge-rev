@@ -1064,10 +1064,32 @@ index 6d37d48..5333b56 100644
 +	render.JSON(w, r, render.M{"meta": C.Meta, "version": C.Version, "applicationProcessRouting": 1, "applicationDNSRouting": 1})
  }
 diff --git a/listener/sing_tun/server.go b/listener/sing_tun/server.go
-index 1962a1e..340b8e1 100644
+index 1962a1e..b9dc32c 100644
 --- a/listener/sing_tun/server.go
 +++ b/listener/sing_tun/server.go
-@@ -610,6 +610,9 @@ type cDialerInterfaceFinder struct {
+@@ -65,6 +65,7 @@ type Listener struct {
+ 	routeExcludeAddressSet   []*netipx.IPSet
+ 
+ 	dnsServerIp []string
++	platformDNS io.Closer
+ }
+ 
+ type ListenerHandler struct {
+@@ -512,6 +513,13 @@ func New(options LC.Tun, tunnel C.Tunnel, additions ...inbound.Addition) (l *Lis
+ 		return
+ 	}
+ 	l.tunStack = tunStack
++	if options.AutoRoute && resolver.DefaultResolver != nil {
++		l.platformDNS, err = configurePlatformDNS(tunName, dnsServerIp)
++		if err != nil {
++			err = E.Cause(err, "configure TUN DNS")
++			return
++		}
++	}
+ 
+ 	if l.autoRedirect != nil {
+ 		if len(l.options.RouteAddressSet) > 0 && len(l.routeAddressSet) == 0 {
+@@ -610,6 +618,9 @@ type cDialerInterfaceFinder struct {
  }
  
  func (d *cDialerInterfaceFinder) DefaultInterfaceName(destination netip.Addr) string {
@@ -1077,6 +1099,14 @@ index 1962a1e..340b8e1 100644
  	if netInterface, _ := DefaultInterfaceFinder.ByAddr(destination); netInterface != nil {
  		return netInterface.Name
  	}
+@@ -677,6 +688,7 @@ func (l *Listener) Close() error {
+ 		dialer.DefaultInterfaceFinder.CompareAndSwap(l.cDialerInterfaceFinder, nil)
+ 	}
+ 	return common.Close(
++		l.platformDNS,
+ 		l.ruleUpdateCallbackCloser,
+ 		l.tunStack,
+ 		l.tunIf,
 diff --git a/rules/common/application_process.go b/rules/common/application_process.go
 new file mode 100644
 index 0000000..c959760
@@ -2084,3 +2114,164 @@ index c409a29..53c9876 100644
  			proxyAdapter, rule, err = resolveMetadata(metadata)
  			if err != nil {
  				return nil, err
+diff --git a/dns/tun_upstream_test.go b/dns/tun_upstream_test.go
+new file mode 100644
+index 0000000..9a0c2e0
+--- /dev/null
++++ b/dns/tun_upstream_test.go
+@@ -0,0 +1,20 @@
++package dns
++
++import (
++	"testing"
++
++	"github.com/metacubex/mihomo/component/resolver"
++)
++
++func TestCapturedTunDNSDoesNotBecomeItsOwnUpstream(t *testing.T) {
++	resolver.AddSystemDnsBlacklist("198.18.0.2", "fdfe:dcba:9876::2")
++	defer resolver.RemoveSystemDnsBlacklist("198.18.0.2", "fdfe:dcba:9876::2")
++	clients := transform([]NameServer{
++		{Net: "udp", Addr: "198.18.0.2:53"},
++		{Net: "udp", Addr: "[fdfe:dcba:9876::2]:53"},
++		{Net: "udp", Addr: "192.0.2.53:53"},
++	}, nil)
++	if len(clients) != 1 {
++		t.Fatalf("the physical upstream must remain without a TUN DNS loop: got %d clients", len(clients))
++	}
++}
+diff --git a/dns/util.go b/dns/util.go
+index 0a0c6e4..4ced714 100644
+--- a/dns/util.go
++++ b/dns/util.go
+@@ -116,6 +116,9 @@ func isIPRequest(q D.Question) bool {
+ func transform(servers []NameServer, resolver resolver.Resolver) []dnsClient {
+ 	ret := make([]dnsClient, 0, len(servers))
+ 	for _, s := range servers {
++		if isTunNameServer(s) {
++			continue
++		}
+ 		var c dnsClient
+ 		switch s.Net {
+ 		case "tls":
+@@ -143,6 +146,12 @@ func transform(servers []NameServer, resolver resolver.Resolver) []dnsClient {
+ 	return ret
+ }
+ 
++func isTunNameServer(server NameServer) bool {
++	// Profile reloads can snapshot the temporary resolver into explicit system upstreams.
++	address, err := netip.ParseAddrPort(server.Addr)
++	return err == nil && resolver.IsSystemDnsBlacklisted(address.Addr().String())
++}
++
+ // rewrapClient peels any existing wrapper layers off c to reach the raw transport
+ // client, then re-wraps it according to params. Passing a raw client is fine (the
+ // peel is a no-op), which lets a shared raw transport be re-wrapped per name server.
+diff --git a/listener/sing_tun/dns_darwin.go b/listener/sing_tun/dns_darwin.go
+new file mode 100644
+index 0000000..30c9f1b
+--- /dev/null
++++ b/listener/sing_tun/dns_darwin.go
+@@ -0,0 +1,87 @@
++package sing_tun
++
++import (
++	"bufio"
++	"fmt"
++	"io"
++	"os"
++	"os/exec"
++	"strings"
++	"sync"
++	"time"
++)
++
++type platformDNS struct {
++	command *exec.Cmd
++	input   io.WriteCloser
++	done    chan error
++	once    sync.Once
++}
++
++func (d *platformDNS) Close() error {
++	d.once.Do(func() {
++		d.input.Close()
++		d.command.Process.Kill()
++		<-d.done
++	})
++	return nil
++}
++
++func configurePlatformDNS(name string, servers []string) (io.Closer, error) {
++	if len(servers) == 0 {
++		return nil, nil
++	}
++	command := exec.Command("/usr/sbin/scutil")
++	input, err := command.StdinPipe()
++	if err != nil {
++		return nil, err
++	}
++	output, err := command.StdoutPipe()
++	if err != nil {
++		input.Close()
++		return nil, err
++	}
++	command.Stderr = command.Stdout
++	if err = command.Start(); err != nil {
++		input.Close()
++		return nil, err
++	}
++	d := &platformDNS{command: command, input: input, done: make(chan error, 1)}
++	ready := make(chan error, 1)
++	go func() {
++		scanner := bufio.NewScanner(output)
++		for scanner.Scan() {
++			line := scanner.Text()
++			if strings.Contains(line, "ClashVergeDNSReady : yes") {
++				select {
++				case ready <- nil:
++				default:
++				}
++			}
++			if strings.Contains(line, "Permission denied") {
++				select {
++				case ready <- fmt.Errorf("macOS refused the temporary TUN DNS resolver"):
++				default:
++				}
++			}
++		}
++		d.done <- command.Wait()
++	}()
++	key := fmt.Sprintf("State:/Network/Service/ClashVergeTunDNS-%d-%s/DNS", os.Getpid(), name)
++	// A temporary value disappears with scutil's session, including after a core crash.
++	commands := fmt.Sprintf("d.init\nd.add ServerAddresses * %s\nd.add SupplementalMatchDomains * \"\"\nd.add SupplementalMatchDomainsNoSearch # 1\nd.add SearchOrder # 1\nd.add InterfaceName %s\nd.add ClashVergeDNSReady yes\nadd %s temporary\nshow %s\n", strings.Join(servers, " "), name, key, key)
++	if _, err = io.WriteString(input, commands); err != nil {
++		d.Close()
++		return nil, err
++	}
++	select {
++	case err = <-ready:
++		if err == nil {
++			return d, nil
++		}
++	case <-time.After(3 * time.Second):
++		err = fmt.Errorf("macOS did not confirm the temporary TUN DNS resolver")
++	}
++	d.Close()
++	return nil, err
++}
+diff --git a/listener/sing_tun/dns_other.go b/listener/sing_tun/dns_other.go
+new file mode 100644
+index 0000000..2a43e6c
+--- /dev/null
++++ b/listener/sing_tun/dns_other.go
+@@ -0,0 +1,9 @@
++//go:build !darwin
++
++package sing_tun
++
++import "io"
++
++func configurePlatformDNS(_ string, _ []string) (io.Closer, error) {
++	return nil, nil
++}

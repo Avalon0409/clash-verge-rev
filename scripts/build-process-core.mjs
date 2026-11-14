@@ -60,6 +60,8 @@ try {
     'go',
     [
       'test',
+      '-tags',
+      'with_gvisor',
       './rules/common',
       './component/process',
       './adapter/outboundgroup',
@@ -71,6 +73,7 @@ try {
       './dns',
       './rules/provider',
       './tunnel',
+      './listener/sing_tun',
     ],
     {
       cwd: work,
@@ -86,7 +89,7 @@ try {
       'with_gvisor',
       '-trimpath',
       '-ldflags',
-      `-s -w -X github.com/metacubex/mihomo/constant.Version=${source.version}-app-dns-4`,
+      `-s -w -X github.com/metacubex/mihomo/constant.Version=${source.version}-app-dns-5`,
       '-o',
       resolve(root, `src-tauri/sidecar/verge-mihomo-${host}`),
     ],
