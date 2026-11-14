@@ -1640,6 +1640,69 @@ index 86dbc14..2939e2d 100644
  		}
  		if rematchProxy != nil {
  			if slices.Contains(rematchChain, rematchProxy.Name()) {
+diff --git a/component/fakeip/pool.go b/component/fakeip/pool.go
+index 0417e20..5bed5a7 100644
+--- a/component/fakeip/pool.go
++++ b/component/fakeip/pool.go
+@@ -88,7 +88,18 @@ func (p *Pool) IPNet() netip.Prefix {
+ 
+ // CloneFrom clone cache from old pool
+ func (p *Pool) CloneFrom(o *Pool) {
++	if p == o {
++		return
++	}
++	o.mux.Lock()
++	defer o.mux.Unlock()
++	p.mux.Lock()
++	defer p.mux.Unlock()
+ 	o.store.CloneTo(p.store)
++	if p.ipnet.Masked() == o.ipnet.Masked() {
++		p.offset = o.offset
++		p.cycle = o.cycle
++	}
+ }
+ 
+ func (p *Pool) get(host string) netip.Addr {
+diff --git a/component/fakeip/pool_test.go b/component/fakeip/pool_test.go
+index c445807..a240374 100644
+--- a/component/fakeip/pool_test.go
++++ b/component/fakeip/pool_test.go
+@@ -212,6 +212,35 @@ func TestPool_Clone(t *testing.T) {
+ 	assert.True(t, lastExist)
+ }
+ 
++func TestPoolClonePreservesAllocationAfterReload(t *testing.T) {
++	for _, prefix := range []string{"198.18.0.1/28", "2001:2::/124"} {
++		for _, allocated := range []int{2, 14} {
++			t.Run(fmt.Sprintf("%s/%d", prefix, allocated), func(t *testing.T) {
++				options := Options{IPNet: netip.MustParsePrefix(prefix), Size: 64}
++				old, err := New(options)
++				if err != nil {
++					t.Fatal(err)
++				}
++				for i := 0; i < allocated; i++ {
++					old.Lookup(fmt.Sprintf("cached-%d.example", i))
++				}
++				reloaded, err := New(options)
++				if err != nil {
++					t.Fatal(err)
++				}
++				reloaded.CloneFrom(old)
++				for i := 0; i < 8; i++ {
++					host := fmt.Sprintf("new-%d.example", i)
++					want := old.Lookup(host)
++					if got := reloaded.Lookup(host); got != want {
++						t.Fatalf("reload reused a cached address: got %s, want next address %s", got, want)
++					}
++				}
++			})
++		}
++	}
++}
++
+ func TestPool_Error(t *testing.T) {
+ 	ipnet := netip.MustParsePrefix("192.168.0.1/31")
+ 	_, err := New(Options{
 diff --git a/config/config.go b/config/config.go
 index 707114a..6573db8 100644
 --- a/config/config.go
