@@ -1488,7 +1488,7 @@ index 474d01e..f9e3cf2 100644
  		parsed = RC.NewDomain(payload, target)
  	case "DOMAIN-SUFFIX":
 diff --git a/tunnel/tunnel.go b/tunnel/tunnel.go
-index 86dbc14..d9caa78 100644
+index 86dbc14..c70deca 100644
 --- a/tunnel/tunnel.go
 +++ b/tunnel/tunnel.go
 @@ -335,10 +335,15 @@ func resolveMetadata(metadata *C.Metadata) (proxy C.Proxy, rule C.Rule, err erro
@@ -1584,7 +1584,25 @@ index 86dbc14..d9caa78 100644
  	defer cancel()
  	remoteConn, err := retry(ctx, func(ctx context.Context) (remoteConn C.Conn, err error) {
  		remoteConn, err = proxy.DialContext(ctx, dialMetadata)
-@@ -659,35 +679,75 @@ func match(metadata *C.Metadata, helper C.RuleMatchHelper) (C.Proxy, C.Rule, err
+@@ -625,10 +645,15 @@ func handleTCPConn(connCtx C.ConnContext) {
+ }
+ 
+ func logMetadataErr(metadata *C.Metadata, rule C.Rule, proxy C.ProxyAdapter, err error) {
++	logErr := log.Warnln
++	// A successful DNS upstream cancels the other in-flight DNS dials.
++	if metadata.Type == C.INNER && errors.Is(err, context.Canceled) {
++		logErr = log.Debugln
++	}
+ 	if rule == nil {
+-		log.Warnln("[%s] dial %s %s --> %s error: %s", strings.ToUpper(metadata.NetWork.String()), proxy.Name(), metadata.SourceDetail(), metadata.RemoteAddress(), err.Error())
++		logErr("[%s] dial %s %s --> %s error: %s", strings.ToUpper(metadata.NetWork.String()), proxy.Name(), metadata.SourceDetail(), metadata.RemoteAddress(), err.Error())
+ 	} else {
+-		log.Warnln("[%s] dial %s (match %s/%s) %s --> %s error: %s", strings.ToUpper(metadata.NetWork.String()), proxy.Name(), rule.RuleType().String(), rule.Payload(), metadata.SourceDetail(), metadata.RemoteAddress(), err.Error())
++		logErr("[%s] dial %s (match %s/%s) %s --> %s error: %s", strings.ToUpper(metadata.NetWork.String()), proxy.Name(), rule.RuleType().String(), rule.Payload(), metadata.SourceDetail(), metadata.RemoteAddress(), err.Error())
+ 	}
+ }
+ 
+@@ -659,35 +684,75 @@ func match(metadata *C.Metadata, helper C.RuleMatchHelper) (C.Proxy, C.Rule, err
  	for {
  		var rematchProxy C.Proxy
  		var rematchRule C.Rule
