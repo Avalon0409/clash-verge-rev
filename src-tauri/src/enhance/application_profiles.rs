@@ -58,6 +58,25 @@ pub fn preserve_system_dns(dns: &mut Mapping, servers: &[Value]) {
 
 pub fn apply_application_dns(config: &mut Mapping) {
     if let Some(mut proxy_dns) = config.get("dns").and_then(Value::as_mapping).cloned() {
+        let proxies: HashMap<_, _> = ["proxies", "proxy-groups"]
+            .into_iter()
+            .flat_map(|key| config.get(key).and_then(Value::as_sequence).into_iter().flatten())
+            .filter_map(|entry| entry.get("name").and_then(Value::as_str))
+            .map(|name| (name.to_owned(), name.to_owned()))
+            .collect();
+        for key in [
+            "default-nameserver",
+            "nameserver",
+            "fallback",
+            "proxy-server-nameserver",
+            "direct-nameserver",
+            "nameserver-policy",
+            "proxy-server-nameserver-policy",
+        ] {
+            if let Some(value) = proxy_dns.get_mut(key) {
+                rename_dns_nameservers(value, &proxies);
+            }
+        }
         proxy_dns.remove("listen");
         proxy_dns.insert("enhanced-mode".into(), "redir-host".into());
         if let Some(hosts) = config.remove("hosts") {
@@ -193,12 +212,20 @@ fn rename_dns_nameservers(value: &mut Value, proxies: &HashMap<std::string::Stri
         for server in servers {
             rename_dns_nameservers(server, proxies);
         }
+    } else if let Some(values) = value.as_mapping_mut() {
+        for value in values.values_mut() {
+            rename_dns_nameservers(value, proxies);
+        }
     } else if let Some(value_str) = value.as_str()
         && let Some((address, fragment)) = value_str.split_once('#')
     {
         let fragments: Vec<_> = fragment
             .split('&')
-            .map(|part| proxies.get(part).map_or_else(|| part.to_owned(), Clone::clone))
+            .map(|part| match proxies.get(part) {
+                Some(alias) => alias.clone(),
+                None if part == "proxy" => "RULES".to_owned(),
+                None => part.to_owned(),
+            })
             .collect();
         *value = Value::from(format!("{address}#{}", fragments.join("&")));
     }
@@ -533,6 +560,49 @@ mod tests {
             format!("https://8.8.8.8/dns-query#{}", alias("one", "Exit"))
         );
         assert_eq!(dns["enhanced-mode"], "redir-host");
+        Ok(())
+    }
+
+    #[test]
+    fn legacy_dns_proxy_marker_follows_rules_without_overwriting_named_nodes() -> Result<()> {
+        for named_proxy in [false, true] {
+            let mut source: Mapping = serde_yaml_ng::from_str(
+                "dns: {enable: true, nameserver: ['https://1.1.1.1/dns-query#proxy&ecs=1.2.3.4'], nameserver-policy: {example.test: 'https://8.8.8.8/dns-query#proxy', other.test: 'https://9.9.9.9/dns-query#missing'}}",
+            )?;
+            if named_proxy {
+                source.insert(
+                    "proxies".into(),
+                    serde_yaml_ng::from_str("[{name: proxy, type: http, server: 127.0.0.1, port: 1002}]")?,
+                );
+            }
+            let mut global = source.clone();
+            apply_application_dns(&mut global);
+            let global_target = if named_proxy { "proxy" } else { "RULES" };
+            assert_eq!(
+                global["application-dns"]["__global_dns"]["nameserver"][0],
+                format!("https://1.1.1.1/dns-query#{global_target}&ecs=1.2.3.4")
+            );
+            let mut imported = Mapping::new();
+            import_profile(&mut imported, "one", source)?;
+            let target = if named_proxy {
+                alias("one", "proxy")
+            } else {
+                "RULES".to_owned()
+            };
+            let dns = &imported["application-dns"][root_rules("one")];
+            assert_eq!(
+                dns["nameserver"][0],
+                format!("https://1.1.1.1/dns-query#{target}&ecs=1.2.3.4")
+            );
+            assert_eq!(
+                dns["nameserver-policy"]["example.test"],
+                format!("https://8.8.8.8/dns-query#{target}")
+            );
+            assert_eq!(
+                dns["nameserver-policy"]["other.test"],
+                "https://9.9.9.9/dns-query#missing"
+            );
+        }
         Ok(())
     }
 }
