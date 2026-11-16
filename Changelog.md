@@ -4,8 +4,13 @@
 <summary><strong> 🐞 修复问题 </strong></summary>
 
 - Remove missing applications and their saved routing settings when refreshing the application list.
-- Fix app-only TUN routing so disabled apps keep system DNS and routes, and enabled apps try subscription DNS before system DNS.
-- Preserve network adapter DNS when starting, reloading, or stopping TUN.
+- Keep application DNS on its selected exit across global and shared subscriptions, while disabled apps retain native networking.
+- Preserve cached application addresses across core restarts and routing changes.
+- Resolve IPv6-only domains when IPv4 answers are empty.
+- Accept legacy subscription DNS selectors while preserving explicitly named nodes.
+- Stop warning about canceled DNS requests after another upstream replies successfully.
+- Route native application traffic correctly when network route metrics differ.
+- Keep DNS queries inside TUN and restore the previous resolver when TUN stops.
 
 </details>
 
