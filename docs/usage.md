@@ -34,7 +34,7 @@ Windows 应用配置使用完整 EXE 路径。点击列表顶部的刷新按钮�
 
 全局 DNS 覆盖用于公共配置；订阅级 DNS 覆盖用于对应的独立订阅。应用选择订阅后，其订阅配置参与生成该应用的 DNS 设置。修改 DNS 后检查保存值和运行中的核心配置。
 
-涉及应用 DNS 出口和 Windows 多网卡选路的修补在 [PR #1](https://github.com/Avalon0409/clash-verge-rev/pull/1) 中评审。需要排查该类问题时，反馈全局节点、应用节点、DNS 设置及复现步骤。
+2.5.12 已包含 [PR #1](https://github.com/Avalon0409/clash-verge-rev/pull/1) 的应用 DNS 出口和 Windows 多网卡选路修复。需要排查该类问题时，反馈全局节点、应用节点、DNS 设置及复现步骤。
 
 ## 备份与隐私
 

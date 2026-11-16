@@ -32,7 +32,7 @@ macOS 通常在同一路径替换 `.app` 包，例如 `/Applications/Example.app
 
 ## 应用选择了节点，DNS 出口仍异常
 
-核对应用使用的订阅、DNS 覆盖、全局节点与应用节点，并记录连接页和日志里的实际出口。[PR #1](https://github.com/Avalon0409/clash-verge-rev/pull/1) 正在处理这条调用链和 Windows 多网卡选路问题。
+核对应用使用的订阅、DNS 覆盖、全局节点与应用节点，并记录连接页和日志里的实际出口。2.5.12 已包含 [PR #1](https://github.com/Avalon0409/clash-verge-rev/pull/1) 的应用 DNS 出口和 Windows 多网卡选路修复。
 
 ## 在哪里反馈？
 

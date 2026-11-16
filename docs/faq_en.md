@@ -30,7 +30,7 @@ Check the HTTPS service address, account and password, then sign in again. Accou
 
 ## Unexpected application DNS egress
 
-Check the application's subscription and DNS overrides, compare global and application nodes, and record the actual exit shown by the connections page or logs. [PR #1](https://github.com/Avalon0409/clash-verge-rev/pull/1) addresses this DNS path and native Windows multi-adapter routing.
+Check the application's subscription and DNS overrides, compare global and application nodes, and record the actual exit shown by the connections page or logs. Version 2.5.12 includes the application DNS egress and native Windows multi-adapter routing fixes from [PR #1](https://github.com/Avalon0409/clash-verge-rev/pull/1).
 
 ## Feedback
 

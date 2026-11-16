@@ -34,7 +34,7 @@ Passwords, login sessions and decryption material use macOS Keychain or Windows 
 
 Global DNS overrides apply to the shared configuration. Subscription-level overrides apply to the corresponding independent subscription. An application's selected subscription participates in generating its DNS settings. Check both the saved values and running core configuration after changing DNS.
 
-Application DNS egress and native Windows multi-adapter routing changes are under review in [PR #1](https://github.com/Avalon0409/clash-verge-rev/pull/1). Reports for those problems should include global and application node choices, DNS settings and reproduction steps.
+Version 2.5.12 includes the application DNS egress and native Windows multi-adapter routing fixes from [PR #1](https://github.com/Avalon0409/clash-verge-rev/pull/1). Reports for those problems should include global and application node choices, DNS settings and reproduction steps.
 
 ## Backups and privacy
 
