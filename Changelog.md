@@ -1,4 +1,4 @@
-## v2.5.11
+## v2.5.12
 
 <details>
 <summary><strong> 🐞 修复问题 </strong></summary>
@@ -9,8 +9,14 @@
 - Resolve IPv6-only domains when IPv4 answers are empty.
 - Accept legacy subscription DNS selectors while preserving explicitly named nodes.
 - Stop warning about canceled DNS requests after another upstream replies successfully.
+
+**🖥️ Windows**
+
 - Route native application traffic correctly when network route metrics differ.
-- Keep DNS queries inside TUN and restore the previous resolver when TUN stops.
+
+**🍎 macOS**
+
+- Keep DNS queries inside TUN and remove the temporary resolver when TUN stops.
 
 </details>
 
@@ -18,6 +24,16 @@
 <summary><strong> 🚀 优化改进 </strong></summary>
 
 - Update project documentation and help links for Clash Verge App Proxy.
+
+</details>
+
+## v2.5.11
+
+<details>
+<summary><strong> 🐞 修复问题 </strong></summary>
+
+- Fix app-only TUN routing so disabled apps keep system DNS and routes, and enabled apps try subscription DNS before system DNS.
+- Preserve network adapter DNS when starting, reloading, or stopping TUN.
 
 </details>
 
