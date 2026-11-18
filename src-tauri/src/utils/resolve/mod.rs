@@ -32,7 +32,7 @@ static RESOLVE_DONE: AtomicBool = AtomicBool::new(false);
 
 pub(crate) fn init_work_dir_and_logger() -> anyhow::Result<()> {
     AsyncHandler::block_on(async {
-        init_work_config().await;
+        init::init_config().await?;
         logging!(info, Type::Setup, "Initializing logger");
         logger::init().await?;
         Ok(())
@@ -73,6 +73,7 @@ async fn resolve_setup() {
     if config_initialized {
         init_verge_config().await;
     }
+    logging_error!(Type::Config, feat::recover_missing_profile_files().await);
     Config::verify_config_initialization().await;
 
     // Live before the core starts, so a service appearing mid-start is not missed.
@@ -193,10 +194,6 @@ async fn init_silent_updater() {
 pub(crate) fn init_signal() {
     logging!(debug, Type::Setup, "Initializing signal handlers...");
     clash_verge_signal::register(feat::quit);
-}
-
-async fn init_work_config() {
-    logging_error!(Type::Setup, init::init_config().await);
 }
 
 async fn init_tray() {

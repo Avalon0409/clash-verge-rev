@@ -13,6 +13,7 @@ use tauri::Url;
 mod windows;
 
 pub const DEFAULT_USER_AGENT: &str = "freecatencua/v3.1.0 clash-verge Platform/macos";
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 const KEYCHAIN_SERVICE: &str = "io.github.clash-verge-rev.subscription-account";
 const VERIFIED_CORE_HASH: &str = "5c715dd468ea8e978de95fcbd852d31525e51e1299be525505ed90729e9d52f6";
 
@@ -21,7 +22,7 @@ pub struct AccountCredentials {
     pub password: std::string::String,
 }
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 pub(crate) struct AccountSecrets {
     password: std::string::String,
     auth_data: std::string::String,
@@ -66,21 +67,8 @@ fn endpoint(account: &PrfAccount, action: &str) -> std::string::String {
 pub(crate) async fn read_secrets(id: &str) -> Result<AccountSecrets> {
     let id = id.to_owned();
     tokio::task::spawn_blocking(move || {
-        #[cfg(target_os = "macos")]
-        {
-            let bytes = security_framework::passwords::get_generic_password(KEYCHAIN_SERVICE, &id)
-                .map_err(|_| anyhow!("Account credentials are unavailable in Keychain; sign in again"))?;
-            serde_json::from_slice(&bytes).map_err(|_| anyhow!("Stored account credentials are invalid"))
-        }
-        #[cfg(target_os = "windows")]
-        {
-            windows::read(&id)
-        }
-        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-        {
-            let _ = id;
-            bail!("Account subscription credential storage currently requires macOS")
-        }
+        crate::config::account_cache::read(&id)?
+            .ok_or_else(|| anyhow!("Account credentials are unavailable in the local cache; sign in again"))
     })
     .await
     .map_err(|_| anyhow!("Credential storage task failed"))?
@@ -88,50 +76,57 @@ pub(crate) async fn read_secrets(id: &str) -> Result<AccountSecrets> {
 
 pub(crate) async fn write_secrets(id: &str, secrets: &AccountSecrets) -> Result<()> {
     let id = id.to_owned();
-    let bytes = serde_json::to_vec(secrets).map_err(|_| anyhow!("Unable to encode account credentials"))?;
+    let secrets = secrets.clone();
+    tokio::task::spawn_blocking(move || crate::config::account_cache::write(&id, &secrets))
+        .await
+        .map_err(|_| anyhow!("Credential storage task failed"))?
+}
+
+pub(crate) async fn migrate_legacy_secrets(id: std::string::String) -> Result<()> {
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        let _ = id;
+        Ok(())
+    }
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     tokio::task::spawn_blocking(move || {
+        if crate::config::account_cache::read::<AccountSecrets>(&id)?.is_some() {
+            return Ok(());
+        }
         #[cfg(target_os = "macos")]
-        {
-            security_framework::passwords::set_generic_password(KEYCHAIN_SERVICE, &id, &bytes)
-                .map_err(|_| anyhow!("Unable to save account credentials in Keychain"))
-        }
+        let secrets = {
+            use security_framework::item::{ItemClass, ItemSearchOptions, SearchResult};
+            let results = ItemSearchOptions::new()
+                .class(ItemClass::generic_password())
+                .service(KEYCHAIN_SERVICE)
+                .account(&id)
+                .load_data(true)
+                .skip_authenticated_items(true)
+                .search()
+                .map_err(|_| anyhow!("Legacy account could not be migrated without authentication; sign in once"))?;
+            let bytes = results
+                .into_iter()
+                .find_map(|result| match result {
+                    SearchResult::Data(bytes) => Some(bytes),
+                    _ => None,
+                })
+                .context("Legacy account is unavailable; sign in once")?;
+            serde_json::from_slice::<AccountSecrets>(&bytes)
+                .map_err(|_| anyhow!("Legacy account cache is invalid; sign in once"))?
+        };
         #[cfg(target_os = "windows")]
-        {
-            windows::write(&id, &bytes)
-        }
-        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-        {
-            let _ = (id, bytes);
-            bail!("Account subscription credential storage currently requires macOS")
-        }
+        let secrets = windows::read(&id)?;
+        crate::config::account_cache::write(&id, &secrets)
     })
     .await
-    .map_err(|_| anyhow!("Credential storage task failed"))?
+    .context("Legacy account migration task failed")?
 }
 
 pub(crate) async fn delete_secrets(id: &str) -> Result<()> {
     let id = id.to_owned();
-    tokio::task::spawn_blocking(move || {
-        #[cfg(target_os = "macos")]
-        {
-            match security_framework::passwords::delete_generic_password(KEYCHAIN_SERVICE, &id) {
-                Ok(()) => Ok(()),
-                Err(error) if error.code() == -25300 => Ok(()),
-                Err(_) => bail!("Unable to remove account credentials from Keychain"),
-            }
-        }
-        #[cfg(target_os = "windows")]
-        {
-            windows::delete(&id)
-        }
-        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-        {
-            let _ = id;
-            Ok(())
-        }
-    })
-    .await
-    .map_err(|_| anyhow!("Credential storage task failed"))?
+    tokio::task::spawn_blocking(move || crate::config::account_cache::delete(&id))
+        .await
+        .map_err(|_| anyhow!("Credential storage task failed"))?
 }
 
 pub(crate) fn prepare_secrets(credentials: AccountCredentials) -> Result<AccountSecrets> {

@@ -1,9 +1,11 @@
+pub(crate) mod account_cache;
 pub(crate) mod application_proxy;
 mod clash;
 #[allow(clippy::module_inception)]
 mod config;
 pub(crate) mod dns;
 mod encrypt;
+pub(crate) mod migration;
 mod mixed_port;
 mod port;
 mod prfitem;

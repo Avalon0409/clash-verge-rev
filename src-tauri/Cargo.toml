@@ -1,6 +1,6 @@
 [package]
 name = "clash-verge"
-version = "2.5.12"
+version = "2.5.13"
 description = "Application and process proxy routing with Freecat subscriptions"
 authors = ["zzzgydi", "Tunglies", "wonfen", "MystiPanda"]
 license = "GPL-3.0-only"
@@ -30,6 +30,7 @@ identifier = "io.github.clash-verge-rev.clash-verge-rev"
 
 [build-dependencies]
 tauri-build = { version = "2.7.1", features = [] }
+serde_json = { workspace = true }
 
 [dependencies]
 clash-verge-draft = { workspace = true }

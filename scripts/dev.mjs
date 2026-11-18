@@ -26,6 +26,9 @@ export function buildTauriInvocation(
   platform = process.platform,
 ) {
   const env = { ...environment, RUST_BACKTRACE: 'full' }
+  env.CARGO_TARGET_DIR ||= fileURLToPath(
+    new URL('../target.noindex', import.meta.url),
+  )
   const features = mode === 'sidecar' ? 'verge-dev,dev-sidecar' : 'verge-dev'
   const args = ['exec', 'tauri', 'dev', '-f', features]
   if (mode === 'trace') {

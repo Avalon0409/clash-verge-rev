@@ -203,7 +203,10 @@ pub fn enforce_before_initialization() -> LaunchDisposition {
     };
 
     match evaluate_install_location(&executable, &home) {
-        LaunchLocation::Allowed { .. } => LaunchDisposition::Continue,
+        LaunchLocation::Allowed { bundle } => {
+            register_installed_bundle(&bundle);
+            LaunchDisposition::Continue
+        }
         LaunchLocation::Translocated => {
             show_message(&clash_verge_i18n::t!("launchGuard.translocated"));
             LaunchDisposition::Exit
@@ -223,6 +226,15 @@ pub fn enforce_before_initialization() -> LaunchDisposition {
         }
         LaunchLocation::Movable { bundle } => move_and_relaunch(&bundle, &home),
     }
+}
+
+fn register_installed_bundle(bundle: &Path) {
+    let _ = std::process::Command::new(
+        "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister",
+    )
+    .arg("-f")
+    .arg(bundle)
+    .output();
 }
 
 fn move_and_relaunch(bundle: &Path, home: &Path) -> LaunchDisposition {
@@ -276,6 +288,7 @@ fn move_and_relaunch(bundle: &Path, home: &Path) -> LaunchDisposition {
             return LaunchDisposition::Exit;
         }
     };
+    register_installed_bundle(&destination);
     let relaunched = std::process::Command::new("/usr/bin/open")
         .args(["-n"])
         .arg(&destination)

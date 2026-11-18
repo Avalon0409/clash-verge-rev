@@ -112,28 +112,9 @@ pub async fn restart_core() -> CmdResult {
     result
 }
 
-/// Replaces the managed core binary atomically instead of letting mihomo overwrite itself.
-#[tauri::command]
-pub async fn upgrade_clash_core(force: bool) -> CmdResult<feat::CoreUpgradeReport> {
-    let report = feat::upgrade_core(force).await.with_error_code("CORE_UPGRADE_FAILED")?;
-    if report.upgraded {
-        handle::Handle::refresh_clash();
-    }
-    Ok(report)
-}
-
 #[tauri::command]
 pub async fn use_bundled_clash_core() -> CmdResult {
-    let core = Config::verge().await.latest_arc().get_valid_clash_core();
-    let path = tauri::utils::platform::current_exe()
-        .stringify_err()?
-        .with_file_name(format!("{core}{}", std::env::consts::EXE_SUFFIX));
-    crate::core::service::stage_approved_core(&path).with_error_code("BUNDLED_CORE_INSTALL_FAILED")?;
-    if Config::verge().await.latest_arc().get_valid_clash_core() != core {
-        return Err("The selected core changed; retry applying the bundled core".into());
-    }
-    CoreManager::global()
-        .restart_core()
+    feat::use_bundled_core()
         .await
         .with_error_code("BUNDLED_CORE_RESTART_FAILED")?;
     handle::Handle::refresh_clash();

@@ -2,7 +2,7 @@
 
 **Applies to:** the Windows and macOS custom releases maintained in [Avalon0409/clash-verge-rev](https://github.com/Avalon0409/clash-verge-rev).
 
-**Last updated:** 2026-11-12
+**Last updated:** 2026-11-18
 
 Clash Verge App Proxy stores application configuration and logs locally. Features that contact a network service include proxy traffic, Freecat sign-in, subscription downloads, DNS, network tests and backups. This document describes those connections and the data they use.
 
@@ -17,7 +17,7 @@ The custom client uses the existing application data directory:
 
 Application settings include selected application paths, routing modes, subscriptions and nodes. Profile files can contain subscription URLs, proxy addresses and credentials. Core caches, DNS configuration and logs also live on the device. WebDAV connection details are stored with the application settings.
 
-Freecat passwords, login sessions and subscription decryption material use **macOS Keychain** or **Windows Credential Manager**. Profile metadata stores the account's service address, email and a reference to those credentials. Copying application files to another computer requires signing in there. Remove an account through the client to remove its associated stored credentials.
+Freecat passwords, login sessions and subscription decryption material use private local JSON files under `account-cache/` in this directory. Files are restricted to the current account with Unix permissions or Windows access controls. Routine operations no longer use macOS Keychain or Windows Credential Manager. The first upgrade attempts a noninteractive read of legacy credentials and retains old credential-store entries for rollback; inaccessible credentials require one sign-in. Profile metadata stores the account's service address, email and a reference to those credentials. Copying application files to another computer requires signing in there. Remove an account through the client to remove its associated stored credentials.
 
 Logs can contain application paths, process information, requested domains, IP addresses and connection errors. The log level and cleanup settings control what is retained. Exported configurations and logs may include sensitive account or subscription information.
 
@@ -29,7 +29,7 @@ The bundled Mihomo core sends routed traffic to the proxy servers selected in yo
 
 ### Freecat accounts
 
-Signing in sends your account email and password over HTTPS to the service address you provide. Subscription refreshes use the returned login session and download subscription data from that provider. The client stores account secrets in the operating system's credential store and decrypts the returned subscription locally.
+Signing in sends your account email and password over HTTPS to the service address you provide. Subscription refreshes use the returned login session and download subscription data from that provider. The client stores account secrets in private local cache files and decrypts the returned subscription locally.
 
 The account provider operates this login and subscription service. Its privacy policy applies to the information you submit to it.
 
@@ -43,9 +43,9 @@ DNS resolution contacts the resolvers used by your system and generated core con
 
 ### Updates and downloads
 
-Custom `app-proxy` releases use manual application updates from [this project's Releases](https://github.com/Avalon0409/clash-verge-rev/releases). The client has no upstream application-update endpoint configured. GitHub receives normal requests when you open the release page or download a package.
+Starting with 2.5.13, custom `app-proxy` releases check [this project’s GitHub Releases](https://github.com/Avalon0409/clash-verge-rev/releases) for signed application updates. Automatic checks follow the application’s update setting. GitHub receives normal requests for the update manifest and package downloads. Downloaded update packages are cached locally and verified before installation.
 
-Application routing uses the matching bundled core. Developer resource preparation and user-initiated component downloads can contact component providers, including Mihomo and the service component's release host.
+Application routing uses the matching bundled patched core, which updates only with the application. Startup can synchronize the service’s approved core copies from the installed package. Developer resource preparation contacts the pinned Mihomo source and the service and geodata release hosts.
 
 ### IP information and network tests
 
@@ -55,7 +55,7 @@ These destinations are independent third parties. The client also supports openi
 
 ### WebDAV and exported backups
 
-WebDAV backup uploads configuration to the server you choose. Backup archives can include subscription URLs and proxy credentials. Account secrets in Keychain or Credential Manager are separate from the profile files. You control local exports and the destination of backup uploads.
+WebDAV backup uploads configuration to the server you choose. Backup archives can include subscription URLs and proxy credentials. Account cache files are separate from exported profile files. Local upgrade backups can include configuration and cached subscription files; they remain under the application data directory. You control local exports and the destination of backup uploads.
 
 ### Local control and proxy listeners
 

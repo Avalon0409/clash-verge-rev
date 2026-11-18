@@ -621,7 +621,12 @@ impl CoreManager {
             return Ok(());
         }
 
-        let startup = self.prepare_startup().await;
+        self.prepare_startup().await;
+        crate::core::service::ensure_bundled_service().await?;
+        let startup = startup_decision(
+            &SERVICE_MANAGER.current().await,
+            Config::verge().await.latest_arc().enable_tun_mode.unwrap_or(false),
+        );
         tracing::Span::current().record("decision", tracing::field::debug(&startup));
         if matches!(startup, StartupDecision::Wait) {
             self.rollback_failed_start().await;

@@ -4,7 +4,10 @@ use crate::{
     cmd,
     config::{Config, PrfItem, PrfOption, profiles::profiles_update_item_safe},
     core::{CoreManager, handle, tray, validate::ValidationOutcome},
-    utils::help::{mask_err, mask_url},
+    utils::{
+        dirs,
+        help::{mask_err, mask_url},
+    },
 };
 use anyhow::{Result, bail};
 use clash_verge_logging::{Type, logging, logging_error};
@@ -263,6 +266,40 @@ pub async fn update_profile(uid: &String, option: Option<&PrfOption>, is_mannual
         }
     }
 
+    Ok(())
+}
+
+pub(crate) async fn recover_missing_profile_files() -> Result<()> {
+    let profiles = Config::profiles().await.latest_arc();
+    let directory = dirs::app_profiles_dir()?;
+    for item in profiles.items.iter().flatten() {
+        if item.itype.as_deref() != Some("remote") {
+            continue;
+        }
+        let (Some(uid), Some(file)) = (&item.uid, &item.file) else {
+            continue;
+        };
+        crate::config::IProfiles::validate_profile_file(file)?;
+        if directory.join(file.as_str()).try_exists()? {
+            continue;
+        }
+        let result = async {
+            if let Some((url, option)) = should_update_profile(uid, true).await? {
+                perform_profile_update(uid, &url, option.as_ref(), None, false).await?;
+            }
+            Ok::<(), anyhow::Error>(())
+        }
+        .await;
+        match result {
+            Ok(()) => logging!(info, Type::Config, "Recovered cached subscription {uid}"),
+            Err(error) => logging!(
+                warn,
+                Type::Config,
+                "Unable to recover cached subscription {uid}: {}",
+                mask_err(&format!("{error:#}"))
+            ),
+        }
+    }
     Ok(())
 }
 

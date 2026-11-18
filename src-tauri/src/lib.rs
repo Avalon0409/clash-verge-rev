@@ -145,7 +145,6 @@ mod app_init {
             cmd::install_update,
             cmd::cancel_update_download,
             cmd::restart_core,
-            cmd::upgrade_clash_core,
             cmd::use_bundled_clash_core,
             cmd::get_runtime_state,
             cmd::get_pending_failures,

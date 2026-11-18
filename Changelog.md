@@ -1,3 +1,27 @@
+## v2.5.13
+
+<details>
+<summary><strong> 🐞 修复问题 </strong></summary>
+
+- Preserve existing accounts and configuration during upgrades and recover missing cached files.
+- Synchronize the service’s core with the installed application before startup.
+
+**🍎 macOS**
+
+- macOS: refresh the installed application’s launch entry after replacement.
+- macOS: wait for the old service to stop before repairing it during upgrades.
+
+</details>
+
+<details>
+<summary><strong> 🚀 优化改进 </strong></summary>
+
+- Store account passwords and sessions in private local files.
+- Update the application from this project’s signed GitHub Releases.
+- Use only the bundled patched core and remove separate core upgrades.
+
+</details>
+
 ## v2.5.12
 
 <details>
@@ -12,11 +36,11 @@
 
 **🖥️ Windows**
 
-- Route native application traffic correctly when network route metrics differ.
+- Windows: route native application traffic correctly when network route metrics differ.
 
 **🍎 macOS**
 
-- Keep DNS queries inside TUN and remove the temporary resolver when TUN stops.
+- macOS: keep DNS queries inside TUN and remove the temporary resolver when TUN stops.
 
 </details>
 

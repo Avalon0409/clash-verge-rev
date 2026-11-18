@@ -1,7 +1,4 @@
-import {
-  RestartAltRounded,
-  SwitchAccessShortcutRounded,
-} from '@mui/icons-material'
+import { RestartAltRounded } from '@mui/icons-material'
 import {
   Box,
   Button,
@@ -23,7 +20,6 @@ import { useVerge } from '@/hooks/use-verge'
 import {
   changeClashCore,
   restartCore,
-  upgradeClashCore,
   installBundledClashCore,
 } from '@/services/cmds'
 import { mutate } from '@/services/mutate'
@@ -50,7 +46,6 @@ export function ClashCoreViewer({ ref }: { ref?: Ref<DialogRef> }) {
   const { invalidateClashConfig } = useClashInfo()
 
   const [open, setOpen] = useState(false)
-  const [upgrading, setUpgrading] = useState(false)
   const [restarting, setRestarting] = useState(false)
   const [changingCore, setChangingCore] = useState<string | null>(null)
   const [installing, setInstalling] = useState(false)
@@ -110,26 +105,6 @@ export function ClashCoreViewer({ ref }: { ref?: Ref<DialogRef> }) {
     }
   })
 
-  const onUpgrade = useLockFn(async () => {
-    try {
-      setUpgrading(true)
-      await mutate(() => upgradeClashCore(), {
-        id: 'upgrade-clash-core',
-        onFulfilled: (report) => {
-          showNotice.success(
-            report.upgraded
-              ? t('settings.feedback.notifications.clash.versionUpdated')
-              : t('settings.feedback.notifications.clash.alreadyLatestVersion'),
-          )
-        },
-      })
-    } catch {
-      // the funnel already notified
-    } finally {
-      setUpgrading(false)
-    }
-  })
-
   const onUseBundled = useLockFn(async () => {
     setInstalling(true)
     try {
@@ -156,7 +131,7 @@ export function ClashCoreViewer({ ref }: { ref?: Ref<DialogRef> }) {
               variant="outlined"
               size="small"
               loading={installing}
-              disabled={upgrading || restarting || changingCore !== null}
+              disabled={restarting || changingCore !== null}
               sx={{ mr: 1 }}
               onClick={onUseBundled}
             >
@@ -165,22 +140,10 @@ export function ClashCoreViewer({ ref }: { ref?: Ref<DialogRef> }) {
             <Button
               variant="contained"
               size="small"
-              startIcon={<SwitchAccessShortcutRounded />}
-              loadingPosition="start"
-              loading={upgrading}
-              disabled={installing || restarting || changingCore !== null}
-              sx={{ marginRight: '8px' }}
-              onClick={onUpgrade}
-            >
-              {t('shared.actions.upgrade')}
-            </Button>
-            <Button
-              variant="contained"
-              size="small"
               startIcon={<RestartAltRounded />}
               loadingPosition="start"
               loading={restarting}
-              disabled={installing || upgrading}
+              disabled={installing || changingCore !== null}
               onClick={onRestart}
             >
               {t('shared.actions.restart')}
@@ -207,9 +170,7 @@ export function ClashCoreViewer({ ref }: { ref?: Ref<DialogRef> }) {
             key={each.core}
             selected={each.core === clash_core}
             onClick={() => onCoreChange(each.core)}
-            disabled={
-              installing || changingCore !== null || restarting || upgrading
-            }
+            disabled={installing || changingCore !== null || restarting}
           >
             <ListItemText primary={each.name} secondary={`/${each.core}`} />
             {changingCore === each.core ? (
