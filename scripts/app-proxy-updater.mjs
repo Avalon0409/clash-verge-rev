@@ -110,7 +110,6 @@ export function buildUpdateManifest(directory, tag, notes = '') {
   }
   return {
     version,
-    name: `Clash Verge App Proxy ${version}`,
     notes,
     pub_date: new Date().toISOString(),
     platforms,

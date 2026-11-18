@@ -5,6 +5,7 @@
 
 - Preserve existing accounts and configuration during upgrades and recover missing cached files.
 - Synchronize the service’s core with the installed application before startup.
+- Fix application update checks rejecting the release metadata.
 
 **🍎 macOS**
 
