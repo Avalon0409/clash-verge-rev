@@ -1,16 +1,10 @@
 use super::AccountSecrets;
 use anyhow::{Result, anyhow, ensure};
-use windows_sys::Win32::{
-    Foundation::{ERROR_NOT_FOUND, GetLastError},
-    Security::{
-        Credentials::{
-            CRED_MAX_CREDENTIAL_BLOB_SIZE, CRED_PERSIST_LOCAL_MACHINE, CRED_TYPE_GENERIC, CREDENTIALW, CredDeleteW,
-            CredFree, CredReadW, CredWriteW,
-        },
-        Cryptography::{
-            BCRYPT_AES_CBC_ALG_HANDLE, BCRYPT_BLOCK_PADDING, BCRYPT_KEY_HANDLE, BCryptDecrypt, BCryptDestroyKey,
-            BCryptGenerateSymmetricKey,
-        },
+use windows_sys::Win32::Security::{
+    Credentials::{CRED_TYPE_GENERIC, CredFree, CredReadW},
+    Cryptography::{
+        BCRYPT_AES_CBC_ALG_HANDLE, BCRYPT_BLOCK_PADDING, BCRYPT_KEY_HANDLE, BCryptDecrypt, BCryptDestroyKey,
+        BCryptGenerateSymmetricKey,
     },
 };
 
@@ -38,38 +32,6 @@ pub(super) fn read(id: &str) -> Result<AccountSecrets> {
         CredFree(credential.cast());
         result
     }
-}
-
-pub(super) fn write(id: &str, bytes: &[u8]) -> Result<()> {
-    let mut target = target(id)?;
-    ensure!(
-        bytes.len() <= CRED_MAX_CREDENTIAL_BLOB_SIZE as usize,
-        "Account credentials exceed the Windows Credential Manager size limit"
-    );
-    let credential = CREDENTIALW {
-        Type: CRED_TYPE_GENERIC,
-        TargetName: target.as_mut_ptr(),
-        CredentialBlobSize: bytes.len() as u32,
-        CredentialBlob: bytes.as_ptr().cast_mut(),
-        Persist: CRED_PERSIST_LOCAL_MACHINE,
-        ..unsafe { std::mem::zeroed() }
-    };
-    ensure!(
-        unsafe { CredWriteW(&credential, 0) } != 0,
-        "Unable to save account credentials in Windows Credential Manager"
-    );
-    Ok(())
-}
-
-pub(super) fn delete(id: &str) -> Result<()> {
-    let target = target(id)?;
-    unsafe {
-        ensure!(
-            CredDeleteW(target.as_ptr(), CRED_TYPE_GENERIC, 0) != 0 || GetLastError() == ERROR_NOT_FOUND,
-            "Unable to remove account credentials from Windows Credential Manager"
-        );
-    }
-    Ok(())
 }
 
 struct Key(BCRYPT_KEY_HANDLE);
@@ -151,25 +113,6 @@ mod tests {
             decrypt(&ciphertext, &key, &iv).is_err(),
             "Invalid padding must be rejected"
         );
-        Ok(())
-    }
-
-    #[test]
-    #[ignore = "requires an interactive Windows desktop logon"]
-    fn windows_credentials_round_trip_in_the_user_vault() -> Result<()> {
-        let id = format!("test-{}", nanoid::nanoid!());
-        scopeguard::defer! { let _ = delete(&id); }
-        let secrets = AccountSecrets {
-            password: "test credential".into(),
-            ..Default::default()
-        };
-        write(&id, &serde_json::to_vec(&secrets)?)?;
-        ensure!(
-            read(&id)?.password == secrets.password,
-            "Credential Manager must preserve the account password"
-        );
-        delete(&id)?;
-        ensure!(read(&id).is_err(), "Deleted credentials must not be returned");
         Ok(())
     }
 }

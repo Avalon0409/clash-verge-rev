@@ -2,7 +2,7 @@
   "identifier": "io.github.clash-verge-rev.clash-verge-rev",
   "productName": "Clash Verge App Proxy",
   "bundle": {
-    "createUpdaterArtifacts": false,
+    "createUpdaterArtifacts": true,
     "macOS": {
       "minimumSystemVersion": "12.0",
       "signingIdentity": "-"
@@ -10,7 +10,9 @@
   },
   "plugins": {
     "updater": {
-      "endpoints": []
+      "endpoints": [
+        "https://github.com/Avalon0409/clash-verge-rev/releases/latest/download/latest.json"
+      ]
     }
   }
 }

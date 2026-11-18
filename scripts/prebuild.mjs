@@ -660,6 +660,13 @@ async function resolveServiceBundle() {
       log_success(`Extracted service file: ${targetFile}`)
     }
 
+    if (platform === 'darwin') {
+      execFileSync(
+        process.execPath,
+        [path.join(cwd, 'scripts/build-service-upgrade.mjs'), SIDECAR_HOST],
+        { stdio: 'inherit' },
+      )
+    }
     log_success(`service bundle finished: ${archiveFile}`)
   } finally {
     await fsp.rm(tempDir, { recursive: true, force: true })

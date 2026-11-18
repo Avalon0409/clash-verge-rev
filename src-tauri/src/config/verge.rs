@@ -247,46 +247,27 @@ impl IVerge {
 
     pub async fn validate_and_fix_config() -> Result<()> {
         let config_path = dirs::verge_path()?;
-        let mut config = match help::read_yaml::<Self>(&config_path).await {
-            Ok(config) => config,
-            Err(_) => Self::template(),
-        };
-
-        let mut needs_fix = false;
-
-        if let Some(ref core) = config.clash_core {
-            let core_str = core.trim();
-            if core_str.is_empty() || !Self::VALID_CLASH_CORES.contains(&core_str) {
-                logging!(
-                    warn,
-                    Type::Config,
-                    "启动时发现无效的clash_core配置: '{}', 将自动修正为 'verge-mihomo'",
-                    core
-                );
-                config.clash_core = Some("verge-mihomo".into());
-                needs_fix = true;
-            }
-        } else {
-            logging!(
-                info,
-                Type::Config,
-                "启动时发现未配置clash_core, 将设置为默认值 'verge-mihomo'"
-            );
-            config.clash_core = Some("verge-mihomo".into());
-            needs_fix = true;
-        }
-
-        if needs_fix {
-            logging!(debug, Type::Config, "正在保存修正后的配置文件...");
+        let mut config = help::read_yaml::<serde_yaml_ng::Mapping>(&config_path).await?;
+        if Self::normalize_clash_core(&mut config) {
             help::save_yaml(&config_path, &config, Some("# Clash Verge Config")).await?;
-            logging!(info, Type::Config, "配置文件修正完成，需要重新加载配置");
-
-            Self::reload_config_after_fix(config).await;
-        } else {
-            logging!(debug, Type::Config, "clash_core配置验证通过: {:?}", config.clash_core);
+            Self::reload_config_after_fix(help::read_yaml::<Self>(&config_path).await?).await;
         }
-
         Ok(())
+    }
+
+    fn normalize_clash_core(config: &mut serde_yaml_ng::Mapping) -> bool {
+        let core = config
+            .get("clash_core")
+            .and_then(serde_yaml_ng::Value::as_str)
+            .map(str::trim)
+            .filter(|core| Self::VALID_CLASH_CORES.contains(core))
+            .unwrap_or("verge-mihomo");
+        let value = serde_yaml_ng::Value::String(core.into());
+        if config.get("clash_core") == Some(&value) {
+            return false;
+        }
+        config.insert("clash_core".into(), value);
+        true
     }
 
     async fn reload_config_after_fix(updated_config: Self) {
@@ -521,5 +502,23 @@ impl IVerge {
         } else {
             LevelFilter::Info
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::IVerge;
+
+    #[test]
+    fn core_configuration_upgrade_preserves_unknown_options() -> anyhow::Result<()> {
+        for core in ["", "removed-core", " verge-mihomo "] {
+            let mut config: serde_yaml_ng::Mapping =
+                serde_yaml_ng::from_str(&format!("clash_core: '{core}'\ncustom_option: keep-me\n"))?;
+            assert!(IVerge::normalize_clash_core(&mut config));
+            assert_eq!(config["clash_core"].as_str(), Some("verge-mihomo"));
+            assert_eq!(config["custom_option"].as_str(), Some("keep-me"));
+            assert!(!IVerge::normalize_clash_core(&mut config));
+        }
+        Ok(())
     }
 }

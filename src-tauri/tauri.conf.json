@@ -1,5 +1,5 @@
 {
-  "version": "2.5.12",
+  "version": "2.5.13",
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "bundle": {
     "active": true,
@@ -13,7 +13,7 @@
       "icons/Assets.car"
     ],
     "resources": ["resources"],
-    "publisher": "Clash Verge Rev",
+    "publisher": "Clash Verge App Proxy",
     "externalBin": ["sidecar/verge-mihomo", "sidecar/verge-mihomo-alpha"],
     "copyright": "GNU General Public License v3.0",
     "category": "DeveloperTool",
@@ -27,15 +27,18 @@
     "devUrl": "http://localhost:3000/",
     "removeUnusedCommands": true
   },
-  "productName": "Clash Verge",
+  "productName": "Clash Verge App Proxy",
   "identifier": "io.github.clash-verge-rev.clash-verge-rev",
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQyOEMyRjBCQkVGOUJEREYKUldUZnZmbStDeStNMHU5Mmo1N24xQXZwSVRYbXA2NUpzZE5oVzlqeS9Bc0t6RVV4MmtwVjBZaHgK",
-      "endpoints": [],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDlCMkVENDY1QTcxMzRBNTUKUldSVlNoT25aZFF1bStyUE00R3Z4RXJ4bDFuT0ZBRkIwQWo0cmFPdW12UTBNQzVtbUV6RW41eUEK",
+      "endpoints": [
+        "https://github.com/Avalon0409/clash-verge-rev/releases/latest/download/latest.json"
+      ],
       "windows": {
         "installMode": "passive"
-      }
+      },
+      "requireSignedVersion": true
     },
     "deep-link": {
       "desktop": {

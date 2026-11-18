@@ -263,7 +263,7 @@ impl IProfiles {
         bail!("failed to find the profile item \"uid:{uid}\"")
     }
 
-    fn validate_profile_file(file: &str) -> Result<()> {
+    pub(crate) fn validate_profile_file(file: &str) -> Result<()> {
         let mut components = Path::new(file).components();
         if file.is_empty()
             || file.contains('/')

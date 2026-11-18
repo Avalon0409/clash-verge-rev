@@ -1,0 +1,88 @@
+--- a/src/bin/install_service.rs
++++ b/src/bin/install_service.rs
+@@ -740,4 +740,27 @@
+ #[cfg(target_os = "macos")]
++fn wait_for_stopped_owner<T>(mut repair: impl FnMut() -> Result<T, Error>, timeout: Duration) -> Result<T, Error> {
++    let deadline = Instant::now() + timeout;
++    loop {
++        match repair() {
++            Ok(value) => return Ok(value),
++            Err(error) => {
++                if !error
++                    .downcast_ref::<std::io::Error>()
++                    .is_some_and(|error| error.kind() == std::io::ErrorKind::WouldBlock)
++                {
++                    return Err(error);
++                }
++                let remaining = deadline.saturating_duration_since(Instant::now());
++                if remaining.is_zero() {
++                    return Err(error).context("Timed out waiting for service owner release");
++                }
++                std::thread::sleep(remaining.min(Duration::from_millis(100)));
++            }
++        }
++    }
++}
++
++#[cfg(target_os = "macos")]
+ fn main() -> Result<(), Error> {
+     if clash_verge_service_ipc::management::prepare_install_if_requested()? {
+         return Ok(());
+@@ -793,7 +816,8 @@
+         // A loaded job may have lost its plist; only the label still reaches it.
+         run_command("launchctl", &["bootout", &launchd_service_target()], debug)?;
+     }
+-    shared::repair_active_owner_state()?;
++    // launchctl may return while the terminated service still holds its owner lock.
++    wait_for_stopped_owner(shared::repair_active_owner_state, Duration::from_secs(45))?;
+     // Staged where the service is already down, so a core it was running no longer holds its file.
+     install_service_cores(&options.cores)?;
+     publish_staged_binary(&staged, &target_binary_path)?;
+@@ -1400,3 +1424,47 @@
+         assert_eq!(lookup_group_name(gid, 8).unwrap().as_deref(), Some(name));
+     }
+ }
++
++#[cfg(all(test, target_os = "macos"))]
++mod owner_release_tests {
++    use super::*;
++    use std::os::fd::AsRawFd as _;
++
++    #[test]
++    fn waits_for_stopped_owner_release_and_preserves_other_refusals() -> Result<(), Error> {
++        let path = std::env::temp_dir().join(format!("service-owner-release-{}", std::process::id()));
++        let holder = OpenOptions::new().read(true).write(true).create_new(true).open(&path)?;
++        assert_eq!(
++            unsafe { platform_lib::flock(holder.as_raw_fd(), platform_lib::LOCK_EX | platform_lib::LOCK_NB) },
++            0
++        );
++        let contender = OpenOptions::new().read(true).write(true).open(&path)?;
++        let acquire = || {
++            if unsafe { platform_lib::flock(contender.as_raw_fd(), platform_lib::LOCK_EX | platform_lib::LOCK_NB) } != 0
++            {
++                return Err(std::io::Error::last_os_error()).context("owner still stopping");
++            }
++            Ok(())
++        };
++        assert!(wait_for_stopped_owner(acquire, Duration::ZERO).is_err());
++        let release = std::thread::spawn(move || {
++            std::thread::sleep(Duration::from_millis(50));
++            drop(holder);
++        });
++        let result = wait_for_stopped_owner(acquire, Duration::from_secs(2));
++        release.join().expect("release thread panicked");
++        drop(contender);
++        std::fs::remove_file(path)?;
++        result?;
++        let denied = wait_for_stopped_owner(
++            || Err::<(), _>(std::io::Error::from(std::io::ErrorKind::PermissionDenied).into()),
++            Duration::from_secs(2),
++        )
++        .expect_err("permission failures must remain failures");
++        assert_eq!(
++            denied.downcast_ref::<std::io::Error>().unwrap().kind(),
++            std::io::ErrorKind::PermissionDenied
++        );
++        Ok(())
++    }
++}

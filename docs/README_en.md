@@ -25,14 +25,14 @@ Download a release marked `app-proxy` from [this project's Releases](https://git
 | Windows | Choose the matching installer. Install or start the service when the client prompts you to enable TUN. |
 | macOS | Requires macOS 12 or later. Choose the matching Intel or Apple Silicon package. |
 
-Custom releases use manual updates. Download a new package from this repository when upgrading. Application routing requires the matching bundled core; the core settings can reload it. See the [installation guide](./usage_en.md#installation-and-updates).
+Starting with 2.5.13, in-app updates use signed packages from this repository’s GitHub Releases. Install 2.5.13 manually once when upgrading from 2.5.12 or earlier. Each package includes the patched core, service and startup resources. The core updates with the application; separate core upgrades are disabled. Startup checks and migrates existing configuration and synchronizes the service’s core copies while preserving accounts, subscriptions and application settings. See the [installation guide](./usage_en.md#installation-and-updates).
 
 ## Features
 
 - Save an application's routing mode, subscription and selected node.
 - Inspect applications, parent and child processes, connections and traffic; apply temporary process settings and restore inherited settings.
 - Discover Start Menu applications on Windows and `.app` bundles on macOS.
-- Sign in to a Freecat account and import or refresh its subscription. Account secrets use macOS Keychain or Windows Credential Manager.
+- Sign in to a Freecat account and import or refresh its subscription. Passwords and sessions use private cache files in the local application data directory.
 - Configure global and per-subscription DNS overrides.
 - Manage system proxy, TUN, nodes, rules, subscription enhancements, themes and WebDAV backups.
 

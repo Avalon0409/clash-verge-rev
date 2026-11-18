@@ -18,6 +18,7 @@ scripts/_env.sh
 .eslintcache
 .changelog_backups
 target
+target.noindex
 .vfox.toml
 .vfox
 .claude

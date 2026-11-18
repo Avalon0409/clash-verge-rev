@@ -721,9 +721,9 @@ fn uninstall_service() -> Result<()> {
     Ok(())
 }
 
-fn install_service() -> Result<()> {
+fn bundled_core_sources() -> Result<Vec<clash_verge_service_ipc::management::CoreSource>> {
     let executable = current_exe()?;
-    let cores = crate::config::IVerge::VALID_CLASH_CORES
+    Ok(crate::config::IVerge::VALID_CLASH_CORES
         .iter()
         .map(|core| {
             let name = format!("{core}{}", std::env::consts::EXE_SUFFIX);
@@ -732,8 +732,112 @@ fn install_service() -> Result<()> {
                 name,
             }
         })
-        .collect::<Vec<_>>();
-    invoke_service_install(&cores, false)
+        .collect())
+}
+
+fn install_service() -> Result<()> {
+    invoke_service_install(&bundled_core_sources()?, false)
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum BundledServiceUpdate {
+    None,
+    Cores,
+    Service,
+}
+
+fn bundled_service_update(
+    installation: &clash_verge_service_ipc::InstallationStatus,
+    requirements: &[clash_verge_service_ipc::CoreRequirement],
+) -> BundledServiceUpdate {
+    if installation.satisfies(requirements) {
+        BundledServiceUpdate::None
+    } else if installation.protocol.build_version == clash_verge_service_ipc::VERSION
+        && installation.protocol.supports_client(
+            clash_verge_service_ipc::ProtocolVersion::current(),
+            clash_verge_service_ipc::MIN_REQUIRED_SERVICE_REVISION,
+        )
+    {
+        BundledServiceUpdate::Cores
+    } else {
+        BundledServiceUpdate::Service
+    }
+}
+
+pub(crate) async fn ensure_bundled_service() -> Result<()> {
+    if cfg!(feature = "verge-dev") {
+        return Ok(());
+    }
+    let requirements = tokio::task::spawn_blocking(|| {
+        bundled_core_sources()?
+            .into_iter()
+            .map(|core| {
+                crate::feat::verify_bundled_core(&core.path)?;
+                Ok(clash_verge_service_ipc::CoreRequirement {
+                    name: core.name,
+                    sha256: Some(
+                        clash_verge_service_ipc::management::sha256_file(&core.path).with_context(|| {
+                            format!("Bundled core is missing or unreadable: {}", core.path.display())
+                        })?,
+                    ),
+                })
+            })
+            .collect::<Result<Vec<_>>>()
+    })
+    .await
+    .context("Bundled core inspection task failed")??;
+    let status = SERVICE_MANAGER.current().await;
+    if !matches!(status, ServiceStatus::Ready | ServiceStatus::NeedsReinstall) {
+        return Ok(());
+    }
+    let installation = tokio::time::timeout(
+        Duration::from_secs(5),
+        clash_verge_service_ipc::inspect_installation(&requirements),
+    )
+    .await
+    .context("Timed out inspecting the installed service; retry startup or repair the service in Settings")?
+    .context("Unable to inspect the installed service; retry startup or repair the service in Settings")?;
+    match bundled_service_update(&installation, &requirements) {
+        BundledServiceUpdate::None => return Ok(()),
+        BundledServiceUpdate::Cores => {
+            logging!(
+                info,
+                Type::Service,
+                "Synchronizing bundled cores without reinstalling the service"
+            );
+            SERVICE_MANAGER
+                .run_operation(async {
+                    let outcome =
+                        tokio::task::block_in_place(|| invoke_service_install(&bundled_core_sources()?, true));
+                    if outcome.is_err() {
+                        RUN_STATE.observe_current_health().await;
+                    }
+                    outcome?;
+                    wait_for_service_ipc().await
+                })
+                .await
+                .context("Bundled core synchronization did not complete; repair the service in Settings")?;
+        }
+        BundledServiceUpdate::Service => {
+            logging!(
+                info,
+                Type::Service,
+                "Replacing the incompatible service and its bundled cores"
+            );
+            SERVICE_MANAGER
+                .handle_service_status(ServiceStatus::ReinstallRequired)
+                .await
+                .context("Bundled service upgrade did not complete; repair the service in Settings")?;
+        }
+    }
+    let installation = clash_verge_service_ipc::inspect_installation(&requirements)
+        .await
+        .context("Unable to verify the upgraded service cores")?;
+    anyhow::ensure!(
+        installation.satisfies(&requirements),
+        "Service upgrade did not install all bundled cores"
+    );
+    Ok(())
 }
 
 fn invoke_service_install(cores: &[clash_verge_service_ipc::management::CoreSource], core_only: bool) -> Result<()> {
@@ -770,29 +874,6 @@ fn force_reinstall_service() -> Result<()> {
     install_service().map_err(|err| {
         logging!(error, Type::Service, "强制重装服务失败: {}", err);
         err
-    })
-}
-
-/// Publishes a core into the Service's approved directory through the elevated installer.
-///
-/// The Service only executes administrator-approved copies from its own directory, never the file
-/// beside the app, so a freshly replaced core has to be handed over before a service-mode restart
-/// asks for it. The digest pins the exact bytes being attested: it rides the elevated process's
-/// command line, which no other local account can alter, so a file swapped on disk after this
-/// hash was computed is refused by the installer instead of published.
-pub fn stage_approved_core(core_path: &Path) -> Result<()> {
-    tokio::task::block_in_place(|| {
-        invoke_service_install(
-            &[clash_verge_service_ipc::management::CoreSource {
-                name: core_path
-                    .file_name()
-                    .context("core has no filename")?
-                    .to_string_lossy()
-                    .into_owned(),
-                path: core_path.to_path_buf(),
-            }],
-            true,
-        )
     })
 }
 
@@ -2074,6 +2155,58 @@ mod tests {
     /// A Run State backed by a scripted environment, so these tests never touch the global.
     fn fake_store() -> RunStateStore<FakeEnv> {
         RunStateStore::new(FakeEnv::new())
+    }
+
+    #[test]
+    fn bundled_core_changes_preserve_a_compatible_service_registration() {
+        use clash_verge_service_ipc::{
+            CoreAvailability, CoreInspection, CoreRequirement, InstallationStatus, ProtocolInfo,
+        };
+
+        let requirements = [
+            CoreRequirement {
+                name: "verge-mihomo".into(),
+                sha256: Some("new".into()),
+            },
+            CoreRequirement {
+                name: "verge-mihomo-alpha".into(),
+                sha256: Some("new".into()),
+            },
+        ];
+        let mut installation = InstallationStatus {
+            service_sha256: std::string::String::new(),
+            protocol: ProtocolInfo::current(),
+            cores: requirements
+                .iter()
+                .map(|core| CoreInspection {
+                    name: core.name.clone(),
+                    availability: CoreAvailability::Ready,
+                })
+                .collect(),
+            core_busy: false,
+        };
+        assert_eq!(
+            super::bundled_service_update(&installation, &requirements),
+            super::BundledServiceUpdate::None
+        );
+        for availability in [CoreAvailability::DigestMismatch, CoreAvailability::Missing] {
+            installation.cores[1].availability = availability;
+            assert_eq!(
+                super::bundled_service_update(&installation, &requirements),
+                super::BundledServiceUpdate::Cores
+            );
+        }
+        installation.protocol.build_version = "legacy".into();
+        assert_eq!(
+            super::bundled_service_update(&installation, &requirements),
+            super::BundledServiceUpdate::Service
+        );
+        installation.protocol = ProtocolInfo::current();
+        installation.protocol.min_client_revision = u16::MAX;
+        assert_eq!(
+            super::bundled_service_update(&installation, &requirements),
+            super::BundledServiceUpdate::Service
+        );
     }
 
     /// The legacy single-slot view of a store, for assertions carried over from before the split.

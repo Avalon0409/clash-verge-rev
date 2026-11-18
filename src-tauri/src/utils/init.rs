@@ -492,6 +492,8 @@ pub async fn init_config() -> Result<()> {
 
     ensure_directories().await?;
 
+    crate::config::migration::prepare_configuration().await?;
+
     initialize_config_files().await?;
 
     AsyncHandler::spawn(|| async {

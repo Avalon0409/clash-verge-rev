@@ -22,11 +22,15 @@ Check whether system proxy is enabled or the program has its own HTTP/SOCKS prox
 
 ## Missing application routing after an upgrade
 
-Install an `app-proxy` package from [this repository](https://github.com/Avalon0409/clash-verge-rev/releases) and load its matching bundled core in the core settings. The client and patched core provide application routing together.
+Install an `app-proxy` package from [this repository](https://github.com/Avalon0409/clash-verge-rev/releases). Version 2.5.13 checks and synchronizes the matching core; approve the operating system’s administrator prompt when required. Separate core upgrades are disabled; the patched core updates with the application package.
 
 ## Freecat login or refresh fails
 
-Check the HTTPS service address, account and password, then sign in again. Account secrets belong to the local Keychain or Credential Manager; copying profile files to another computer requires signing in there. Include the version and error when reporting a service protocol change.
+Check the HTTPS service address, account and password, then sign in again. Starting with 2.5.13, passwords and sessions use private local cache files. Routine operations no longer access Keychain or Credential Manager. The first upgrade attempts a silent migration; sign in once if the old credentials are inaccessible. Install the package and sign in with your own account on another computer. Include the version and error when reporting a service protocol change.
+
+## Why does a macOS upgrade still ask for a password?
+
+Installing or updating the TUN service, or publishing bundled cores into its system directory, requires macOS administrator authentication. Startup reuses the existing copies when both the service and cores match the package. Account sign-in and subscription refresh use the local cache. Legacy Keychain migration suppresses authentication dialogs; sign in once in the client if silent migration cannot read the old credentials.
 
 ## Unexpected application DNS egress
 

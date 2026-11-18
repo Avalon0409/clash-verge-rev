@@ -6,7 +6,7 @@
     "type": "git",
     "url": "https://github.com/Avalon0409/clash-verge-rev.git"
   },
-  "version": "2.5.12",
+  "version": "2.5.13",
   "license": "GPL-3.0-only",
   "scripts": {
     "prepare": "husky || true",
@@ -17,7 +17,7 @@
     "dev:trace": "node scripts/dev.mjs trace",
     "dev:tauri": "cross-env RUST_BACKTRACE=full tauri dev -f tauri-dev",
     "build": "cross-env NODE_OPTIONS='--max-old-space-size=4096' tauri build",
-    "build:app-proxy": "pnpm build:process-core && cross-env NODE_OPTIONS='--max-old-space-size=4096' tauri build --debug --bundles app --config src-tauri/tauri.app-proxy.conf.json",
+    "build:app-proxy": "node scripts/build-app-proxy.mjs",
     "build:fast": "cross-env NODE_OPTIONS='--max-old-space-size=4096' tauri build -- --profile fast-release",
     "tauri": "tauri",
     "web:dev": "vite",
@@ -48,7 +48,8 @@
     "perf:run": "node scripts/perf/run.mjs",
     "perf:compare": "node scripts/perf/compare.mjs",
     "perf:test": "node --test scripts/perf/report.test.mjs",
-    "build:process-core": "node scripts/build-process-core.mjs"
+    "build:process-core": "node scripts/build-process-core.mjs",
+    "updater:app-proxy": "node scripts/app-proxy-updater.mjs"
   },
   "dependencies": {
     "@dnd-kit/collision": "^0.5.0",

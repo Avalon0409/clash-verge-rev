@@ -65,7 +65,7 @@ pnpm build:process-core
 pnpm dev
 ```
 
-`pnpm prebuild` prepares platform resources and the service. `pnpm build:process-core` then downloads the pinned Mihomo source, verifies its checksum, applies the project patch, runs its regression packages and builds the bundled core. Run the core build again after forcing a resource refresh with `pnpm prebuild --force`.
+`pnpm prebuild` prepares platform resources and the service. On macOS it also builds the pinned service installer with the owner-release upgrade fix and runs its lock regression. `pnpm build:process-core` then downloads the pinned Mihomo source, verifies its checksum, applies the project patch, runs its regression packages and builds the bundled core. Run the core build again after forcing a resource refresh with `pnpm prebuild --force`.
 
 `pnpm dev` preserves the isolated development environment's existing service installation. Use `pnpm dev:service` to install or update the development service explicitly. Use `pnpm dev:sidecar` to run without that service. `pnpm web:dev` runs the frontend without the desktop backend.
 
@@ -77,16 +77,19 @@ On macOS:
 pnpm build:app-proxy
 ```
 
-This rebuilds the patched core and produces a debug application bundle with `tauri.app-proxy.conf.json`. That configuration requires macOS 12 or later and disables automatic application updates.
+This prepares resources, rebuilds the patched core and produces a production bundle with `tauri.app-proxy.conf.json`. The configuration requires macOS 12 or later and enables signed updates from this repository. Build output defaults to `target.noindex` so development and packaging copies do not appear in Spotlight.
 
 On Windows:
 
 ```sh
-pnpm build:process-core
-pnpm exec tauri build --config src-tauri/tauri.app-proxy.conf.json
+pnpm build:app-proxy -- --target x86_64-pc-windows-msvc --bundles nsis
 ```
 
 The Windows core build also updates the installer's bundled-core hashes. Select a target matching the installed Rust and Node architecture when cross-building.
+
+Release builds require `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, or the maintainer’s existing private key at `~/.config/clash-verge-app-proxy/updater.key`. Keep this key outside the repository and reuse it for future releases. The build validates the patched core version and packaged service and geodata resources.
+
+Collect the signed Windows NSIS installer and macOS `.app.tar.gz` updater archive with their `.sig` files, using the `Clash.Verge.App.Proxy_<version>_windows-x64-setup.exe` and `Clash.Verge.App.Proxy_<version>_macos-arm64.app.tar.gz` names. Generate the update manifest with `pnpm updater:app-proxy <asset-directory> <app-proxy-release-tag> [notes-file]`. It verifies both artifact signatures and their signed versions before writing `latest.json`. Publish that manifest with the packages, signatures, macOS DMG and checksums in the same GitHub Release. Ordinary users receive all required runtime resources in the installers.
 
 ## Validate a change
 

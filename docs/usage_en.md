@@ -4,7 +4,11 @@
 
 Download a matching `app-proxy` release from [this repository](https://github.com/Avalon0409/clash-verge-rev/releases). macOS requires version 12 or later. Choose the Windows installer architecture shown in the release assets.
 
-Custom releases use manual updates. You can export configuration or use WebDAV backup before installing a new package. After installation, verify that the matching bundled core is loaded in the core settings, then check application routing.
+Starting with 2.5.13, manual and automatic update checks use this repository’s GitHub Releases and verify the project’s package signature. Install 2.5.13 manually once from Releases when upgrading from 2.5.12 or earlier, then use in-app updates.
+
+Packages contain the patched core, service and required resources. The core updates with the application; core settings provide restart and use-bundled-core actions. Startup backs up old configuration, recreates missing enhancement files, restores available configuration and subscription caches, and synchronizes service core copies when they differ from the package. Approve the operating system’s administrator prompt if synchronization requires it. Application data remains outside the installed bundle, preserving accounts, subscriptions, node selections and application routing.
+
+On macOS, replace `/Applications/Clash Verge App Proxy.app` and launch that copy. The client registers its launch entry again. Development bundles use `target.noindex` to keep them out of application search.
 
 ## Application routing
 
@@ -28,7 +32,7 @@ Windows application settings use the full EXE path. The refresh button checks sa
 
 Create a Freecat account subscription on the profiles page, enter your HTTPS service address, account and password, and sign in to import it. You can refresh the account subscription later.
 
-Passwords, login sessions and decryption material use macOS Keychain or Windows Credential Manager. The service address, email and credential reference are stored with the profile. Sign in again if the session or system credential store is unavailable.
+Passwords, login sessions and decryption material use private local files under `account-cache/` in the application data directory. Routine sign-in and refresh no longer use Keychain or Credential Manager. The first upgrade attempts a noninteractive migration of accessible legacy credentials; sign in once if they cannot be migrated. The service address, email and credential reference remain with the profile.
 
 ## DNS overrides
 
@@ -38,7 +42,7 @@ Version 2.5.12 includes the application DNS egress and native Windows multi-adap
 
 ## Backups and privacy
 
-Export configuration or configure WebDAV backup. You choose where to store the profiles and proxy configuration. Account secrets live in the system credential store, so sign in again when moving to another computer.
+Export configuration or configure WebDAV backup. You choose where to store the profiles and proxy configuration. Account cache files remain local and are separate from exported profiles, so sign in with your own account when moving to another computer.
 
 See [PRIVACY.md](../PRIVACY.md) for storage, logs and network data flows.
 
