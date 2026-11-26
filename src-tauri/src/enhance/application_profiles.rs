@@ -16,44 +16,43 @@ pub fn root_rules(uid: &str) -> std::string::String {
 }
 
 #[cfg(target_os = "macos")]
-fn replace_system_servers(dns: &mut Value, servers: &[Value]) {
-    match dns {
-        Value::Sequence(values) => {
-            let old = std::mem::take(values);
-            for mut value in old {
-                if value.as_str() == Some("system") {
-                    values.extend_from_slice(servers);
-                } else {
-                    replace_system_servers(&mut value, servers);
-                    values.push(value);
-                }
-            }
-        }
-        Value::Mapping(map) => {
-            for value in map.values_mut() {
-                replace_system_servers(value, servers);
-            }
-        }
-        Value::String(value) if value == "system" => *dns = Value::Sequence(servers.to_vec()),
-        _ => {}
+pub fn native_upstream_fields(native: &crate::utils::resolve::dns::NativeDns) -> Mapping {
+    fn direct(servers: &[String]) -> Value {
+        Value::Sequence(
+            servers
+                .iter()
+                .map(|ip| {
+                    if ip.contains(':') {
+                        Value::from(format!("udp://[{}]:53#DIRECT", ip.replace('%', "%25")))
+                    } else {
+                        Value::from(format!("udp://{ip}:53#DIRECT"))
+                    }
+                })
+                .collect(),
+        )
     }
-}
-
-#[cfg(target_os = "macos")]
-pub fn preserve_system_dns(dns: &mut Mapping, servers: &[Value]) {
-    for key in [
+    // Keep the dynamic system client when no network service is up at startup.
+    let default = if native.default.is_empty() {
+        Value::Sequence(vec!["system".into()])
+    } else {
+        direct(&native.default)
+    };
+    let mut fields: Mapping = [
         "nameserver",
         "default-nameserver",
-        "fallback",
         "proxy-server-nameserver",
         "direct-nameserver",
-        "nameserver-policy",
-        "proxy-server-nameserver-policy",
-    ] {
-        if let Some(value) = dns.get_mut(key) {
-            replace_system_servers(value, servers);
-        }
-    }
+    ]
+    .into_iter()
+    .map(|key| (Value::from(key), default.clone()))
+    .collect();
+    let policies: Mapping = native
+        .domains
+        .iter()
+        .map(|(domain, servers)| (Value::from(domain.clone()), direct(servers)))
+        .collect();
+    fields.insert("nameserver-policy".into(), policies.into());
+    fields
 }
 
 pub fn apply_application_dns(config: &mut Mapping) {
@@ -222,6 +221,7 @@ fn rename_dns_nameservers(value: &mut Value, proxies: &HashMap<std::string::Stri
         let fragments: Vec<_> = fragment
             .split('&')
             .map(|part| match proxies.get(part) {
+                _ if part == "RULES" => part.to_owned(),
                 Some(alias) => alias.clone(),
                 None if part == "proxy" => "RULES".to_owned(),
                 None => part.to_owned(),

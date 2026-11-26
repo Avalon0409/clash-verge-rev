@@ -1,3 +1,26 @@
+## v2.5.14
+
+<details>
+<summary><strong> 🐞 修复问题 </strong></summary>
+
+- Bundle patched core `v1.19.32-app-dns-10`: exclude active TUN DNS endpoints before building upstream resolvers and reject policies left empty after filtering.
+- Remove implicit half-deadline system DNS fallback on enabled subscription profiles so slow public DoH lookups honor the full deadline without falling back to polluted local answers.
+- Resolve `DIRECT` leaf exits with the profile's `direct-nameserver` and skip final lookups for `REJECT`/`REJECT-DROP` exits.
+- Propagate the application DNS context to subsequent destinations sent on the same UDP socket.
+
+**🍎 macOS**
+
+- macOS: parse native resolvers per record, exclude Clash-owned `ClashVergeTunDNS-*` endpoints while preserving Wi-Fi/VPN split DNS, route explicit native upstreams via `DIRECT`, and refresh native DNS on network changes.
+
+</details>
+
+<details>
+<summary><strong> 🚀 优化改进 </strong></summary>
+
+- Default App TUN public DoH presets to `#RULES` so application DNS follows each app's bound exit, and clarify `#RULES` vs pinned node/group behavior in the DNS editor.
+
+</details>
+
 ## v2.5.13
 
 <details>

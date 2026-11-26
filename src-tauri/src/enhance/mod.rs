@@ -1060,22 +1060,10 @@ pub async fn enhance(
     {
         application_profiles::apply_application_dns(&mut config);
         #[cfg(target_os = "macos")]
-        {
-            let servers: Vec<_> = crate::utils::resolve::dns::system_dns_upstreams()
-                .await?
-                .into_iter()
-                .map(Value::from)
-                .collect();
-            if !servers.is_empty() {
-                if let Some(dns) = config.get_mut("dns").and_then(Value::as_mapping_mut) {
-                    application_profiles::preserve_system_dns(dns, &servers);
-                }
-                if let Some(profiles) = config.get_mut("application-dns").and_then(Value::as_mapping_mut) {
-                    for dns in profiles.values_mut().filter_map(Value::as_mapping_mut) {
-                        application_profiles::preserve_system_dns(dns, &servers);
-                    }
-                }
-            }
+        if let Some(dns) = config.get_mut("dns").and_then(Value::as_mapping_mut) {
+            dns.extend(application_profiles::native_upstream_fields(
+                &crate::utils::resolve::dns::system_dns_upstreams().await?,
+            ));
         }
     }
     Ok((use_sort(config), keys, logs, dns))

@@ -567,7 +567,8 @@
         },
         "nameserver": {
           "label": "İsim Sunucusu",
-          "description": "DNS sunucuları listesi, virgülle ayrılmış"
+          "description": "DNS sunucuları listesi, virgülle ayrılmış",
+          "appRoute": "Genel DoH için #RULES uygulama kurallarını izler. Çıkışı sabitlemek için #düğüm veya #grup kullanın. Grup, o anda seçili düğümü kullanır."
         },
         "fallback": {
           "label": "Yedek",

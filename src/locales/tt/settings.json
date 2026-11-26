@@ -567,7 +567,8 @@
         },
         "nameserver": {
           "label": "Nameserver",
-          "description": "List of DNS servers, comma separated"
+          "description": "List of DNS servers, comma separated",
+          "appRoute": "Ачык DoH өчен #RULES кушымта кагыйдәләрен куллана. Чыгу юлын #төен яки #төркем белән билгеләгез. Төркем хәзер сайланган төенне куллана."
         },
         "fallback": {
           "label": "Fallback",

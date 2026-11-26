@@ -1083,7 +1083,7 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
 name = "clash-verge"
-version = "2.5.13"
+version = "2.5.14"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -1139,6 +1139,7 @@ dependencies = [
  "socket2",
  "sysinfo",
  "sysproxy",
+ "system-configuration",
  "tauri",
  "tauri-build",
  "tauri-plugin-autostart",

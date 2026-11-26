@@ -18,52 +18,171 @@ pub(crate) const DNS_SCRIPT_TIMEOUT: Duration = Duration::from_secs(5);
 
 static DNS_LOCK: Mutex<()> = Mutex::const_new(());
 
-pub async fn system_dns_upstreams() -> anyhow::Result<Vec<String>> {
-    let output = tokio::process::Command::new("/usr/sbin/scutil")
-        .arg("--dns")
-        .output()
-        .await?;
-    let text = String::from_utf8_lossy(&output.stdout);
-    let mut servers = Vec::new();
-    for line in text.lines().filter(|line| line.trim_start().starts_with("nameserver[")) {
-        if let Some((_, address)) = line.split_once(" : ") {
-            let address = address.trim();
-            if address.parse::<std::net::IpAddr>().is_ok() && !servers.iter().any(|old| old == address) {
-                servers.push(address.to_owned());
-            }
-        }
-    }
-    if servers == [PLACEHOLDER_DNS] {
-        use tokio::io::AsyncWriteExt as _;
-        let mut child = tokio::process::Command::new("/usr/sbin/scutil")
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .spawn()?;
-        if let Some(mut input) = child.stdin.take() {
-            input.write_all(b"show State:/Network/Global/IPv4\nquit\n").await?;
-        }
-        let output = child.wait_with_output().await?;
-        let text = String::from_utf8_lossy(&output.stdout);
-        if let Some(service) = text
-            .lines()
-            .find_map(|line| line.trim().strip_prefix("PrimaryService : "))
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct NativeDns {
+    pub default: Vec<String>,
+    pub domains: std::collections::BTreeMap<String, Vec<String>>,
+}
+
+fn store_value(
+    store: &system_configuration::dynamic_store::SCDynamicStore,
+    key: &str,
+    field: &str,
+) -> Option<system_configuration::core_foundation::base::CFType> {
+    use system_configuration::core_foundation::{
+        base::{CFType, TCFType as _},
+        dictionary::CFDictionary,
+        string::CFString,
+    };
+    let dict = store.get(key)?.downcast_into::<CFDictionary>()?;
+    let value = dict.find(CFString::new(field).as_CFTypeRef())?;
+    Some(unsafe { CFType::wrap_under_get_rule(*value) })
+}
+
+fn network_services() -> anyhow::Result<(Vec<String>, String, String)> {
+    use system_configuration::{
+        core_foundation::{
+            array::CFArray,
+            base::{CFType, TCFType as _},
+            string::CFString,
+        },
+        dynamic_store::SCDynamicStoreBuilder,
+    };
+    let store = SCDynamicStoreBuilder::new("Clash Verge native DNS")
+        .build()
+        .context("open DNS dynamic store")?;
+    let mut owned = Vec::new();
+    let keys = store
+        .get_keys("State:/Network/Service/ClashVergeTunDNS-.*/DNS")
+        .context("list TUN DNS services")?;
+    for key in keys.iter() {
+        if let Some(addresses) =
+            store_value(&store, &key.to_string(), "ServerAddresses").and_then(CFType::downcast_into::<CFArray>)
         {
-            let dir = restore_dns_state_dir(&crate::utils::dirs::app_resources_dir()?, dns_state_dir()?);
-            let backup = dir.join(DNS_BACKUP_DIR).join(service.trim());
-            if backup.exists() {
-                let original = tokio::fs::read_to_string(backup).await?;
-                let original: Vec<_> = original
-                    .lines()
-                    .filter(|line| line.parse::<std::net::IpAddr>().is_ok())
-                    .map(ToOwned::to_owned)
-                    .collect();
-                if !original.is_empty() {
-                    servers = original;
+            for address in &addresses {
+                if let Some(ip) = unsafe { CFType::wrap_under_get_rule(*address) }.downcast_into::<CFString>() {
+                    owned.push(ip.to_string());
                 }
             }
         }
     }
-    Ok(servers)
+    let primary = |field| {
+        ["State:/Network/Global/IPv4", "State:/Network/Global/IPv6"]
+            .iter()
+            .find_map(|key| {
+                store_value(&store, key, field)?
+                    .downcast_into::<CFString>()
+                    .map(|s| s.to_string())
+            })
+            .unwrap_or_default()
+    };
+    Ok((owned, primary("PrimaryInterface"), primary("PrimaryService")))
+}
+
+fn parse_resolvers(text: &str, owned: &[String], primary: &str) -> NativeDns {
+    let owned: Vec<std::net::IpAddr> = owned
+        .iter()
+        .filter_map(|value| value.split('%').next()?.parse().ok())
+        .collect();
+    let mut dns = NativeDns::default();
+    let mut scoped_default = Vec::new();
+    for section in text.split("DNS configuration").skip(1) {
+        let scoped = section.trim_start().starts_with("(for scoped queries)");
+        if section.trim_start().starts_with("(for service-specific queries)") {
+            continue;
+        }
+        for record in section.split("resolver #").skip(1) {
+            let mut domain = "";
+            let mut interface = "";
+            let mut servers = Vec::new();
+            for line in record.lines() {
+                let Some((key, value)) = line.split_once(':') else {
+                    continue;
+                };
+                let value = value.trim();
+                match key.trim() {
+                    "domain" => domain = value.trim_end_matches('.'),
+                    "if_index" => {
+                        interface = value
+                            .split_once('(')
+                            .and_then(|(_, name)| name.strip_suffix(')'))
+                            .unwrap_or("")
+                    }
+                    key if key.starts_with("nameserver[") => {
+                        let ip = value.split('%').next().unwrap_or(value);
+                        if let Ok(ip) = ip.parse::<std::net::IpAddr>()
+                            && !owned.contains(&ip)
+                            && !servers.iter().any(|old| old == value)
+                        {
+                            servers.push(value.to_owned());
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            if servers.is_empty() {
+                continue;
+            }
+            if !interface.is_empty() {
+                for server in &mut servers {
+                    if let Ok(ip) = server.parse::<std::net::Ipv6Addr>()
+                        && ip.is_unicast_link_local()
+                    {
+                        server.push('%');
+                        server.push_str(interface);
+                    }
+                }
+            }
+            if !domain.is_empty() && !scoped {
+                dns.domains.entry(format!("+.{domain}")).or_insert(servers);
+            } else if domain.is_empty() && !scoped && dns.default.is_empty() {
+                dns.default = servers;
+            } else if domain.is_empty()
+                && scoped
+                && !primary.is_empty()
+                && interface == primary
+                && scoped_default.is_empty()
+            {
+                scoped_default = servers;
+            }
+        }
+    }
+    if dns.default.is_empty() {
+        dns.default = scoped_default;
+    }
+    dns
+}
+
+pub async fn system_dns_upstreams() -> anyhow::Result<NativeDns> {
+    let (mut owned, _, _) = network_services()?;
+    let output = tokio::process::Command::new("/usr/sbin/scutil")
+        .arg("--dns")
+        .output()
+        .await?;
+    ensure!(
+        output.status.success(),
+        "read macOS DNS configuration: {}",
+        output.status
+    );
+    let (after, primary, service) = network_services()?;
+    owned.extend(after);
+    let mut dns = parse_resolvers(&String::from_utf8_lossy(&output.stdout), &owned, &primary);
+    if dns.default == [PLACEHOLDER_DNS] && !service.is_empty() {
+        let dir = restore_dns_state_dir(&crate::utils::dirs::app_resources_dir()?, dns_state_dir()?);
+        let backup = dir.join(DNS_BACKUP_DIR).join(service.trim());
+        if backup.exists() {
+            let original = tokio::fs::read_to_string(backup).await?;
+            let original: Vec<_> = original
+                .lines()
+                .filter(|line| line.parse::<std::net::IpAddr>().is_ok())
+                .map(ToOwned::to_owned)
+                .collect();
+            if !original.is_empty() {
+                dns.default = original.into_iter().filter(|ip| !owned.contains(ip)).collect();
+            }
+        }
+    }
+    Ok(dns)
 }
 
 fn dns_state_dir() -> anyhow::Result<PathBuf> {
@@ -157,6 +276,14 @@ async fn run_dns_script(script: &Path, dir: PathBuf) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn native_defaults_and_vpn_domains_exclude_owned_addresses_across_records() {
+        let output = "DNS configuration\nresolver #1\nnameserver[0] : 198.18.0.2\nresolver #2\ndomain : corp.test\nnameserver[0] : 10.0.0.53\nif_index : 14 (utun4)\nDNS configuration (for scoped queries)\nresolver #1\nnameserver[0] : 198.18.0.2\nnameserver[1] : 192.0.2.53\nnameserver[2] : fe80::1\nif_index : 3 (en1)";
+        let native = super::parse_resolvers(output, &["198.18.0.2".into()], "en1");
+        assert_eq!(native.default, ["192.0.2.53", "fe80::1%en1"]);
+        assert_eq!(native.domains["+.corp.test"], ["10.0.0.53"]);
+    }
 
     #[test]
     #[allow(clippy::expect_used)]

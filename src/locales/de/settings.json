@@ -567,7 +567,8 @@
         },
         "nameserver": {
           "label": "Namenserver",
-          "description": "Liste der DNS-Server, getrennt durch Kommas"
+          "description": "Liste der DNS-Server, getrennt durch Kommas",
+          "appRoute": "Bei öffentlichem DoH folgt #RULES den App-Regeln. #Knoten oder #Gruppe legt den Ausgang fest. Eine Gruppe verwendet ihren aktuell gewählten Knoten."
         },
         "fallback": {
           "label": "Rückfallserver",

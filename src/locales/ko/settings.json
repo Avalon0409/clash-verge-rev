@@ -567,7 +567,8 @@
         },
         "nameserver": {
           "label": "Nameserver",
-          "description": "DNS 서버 목록, 쉼표로 구분"
+          "description": "DNS 서버 목록, 쉼표로 구분",
+          "appRoute": "공용 DoH에서 #RULES는 앱 규칙을 따릅니다. #노드이름 또는 #그룹이름으로 출구를 지정할 수 있습니다. 그룹은 현재 선택된 노드를 사용합니다."
         },
         "fallback": {
           "label": "폴백",

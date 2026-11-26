@@ -567,7 +567,8 @@
         },
         "nameserver": {
           "label": "域名伺服器",
-          "description": "DNS 伺服器列表，用逗號分隔"
+          "description": "DNS 伺服器列表，用逗號分隔",
+          "appRoute": "公網 DoH 使用 #RULES 遵循應用程式規則。使用 #節點名稱 或 #群組名稱 可固定出口，群組會使用目前選取的節點。"
         },
         "fallback": {
           "label": "備援伺服器",

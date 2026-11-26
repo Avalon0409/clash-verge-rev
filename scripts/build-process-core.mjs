@@ -68,6 +68,8 @@ try {
       './adapter/provider',
       './config',
       './component/resolver',
+      './component/sniffer',
+      './hub/executor',
       './component/iface',
       './component/fakeip',
       './component/profile/cachefile',

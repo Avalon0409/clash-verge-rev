@@ -851,6 +851,7 @@ export const translationKeys = [
   'settings.modals.dns.fields.defaultNameserver.description',
   'settings.modals.dns.fields.nameserver.label',
   'settings.modals.dns.fields.nameserver.description',
+  'settings.modals.dns.fields.nameserver.appRoute',
   'settings.modals.dns.fields.fallback.label',
   'settings.modals.dns.fields.fallback.description',
   'settings.modals.dns.fields.proxy.label',

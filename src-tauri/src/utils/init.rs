@@ -333,6 +333,24 @@ async fn migrate_legacy_macos_logs() -> Result<()> {
 pub(super) async fn init_dns_config() -> Result<()> {
     use serde_yaml_ng::Value;
 
+    let dns_path = dirs::app_home_dir()?.join(constants::files::DNS_CONFIG);
+    if dns_path.exists() {
+        return Ok(());
+    }
+    let verge = Config::verge().await.latest_arc();
+    let app_tun =
+        verge.enable_tun_mode == Some(true) && verge.application_proxy.as_ref().is_some_and(|cfg| cfg.enabled);
+    let nameservers = if app_tun {
+        ["https://1.1.1.1/dns-query#RULES", "https://8.8.8.8/dns-query#RULES"].as_slice()
+    } else {
+        [
+            "8.8.8.8",
+            "https://doh.pub/dns-query",
+            "https://dns.alidns.com/dns-query",
+        ]
+        .as_slice()
+    };
+
     let dns_config = serde_yaml_ng::Mapping::from_iter([
         ("enable".into(), Value::Bool(true)),
         // Must match the frontend default used for authoritative `dns.ipv6`.
@@ -373,18 +391,17 @@ pub(super) async fn init_dns_config() -> Result<()> {
         ),
         (
             "nameserver".into(),
-            Value::Sequence(vec![
-                Value::String("8.8.8.8".into()),
-                Value::String("https://doh.pub/dns-query".into()),
-                Value::String("https://dns.alidns.com/dns-query".into()),
-            ]),
+            Value::Sequence(nameservers.iter().map(|s| Value::from(*s)).collect()),
         ),
         ("fallback".into(), Value::Sequence(vec![])),
         (
             "nameserver-policy".into(),
             Value::Mapping(serde_yaml_ng::Mapping::new()),
         ),
-        ("proxy-server-nameserver".into(), Value::Sequence(vec![])),
+        (
+            "proxy-server-nameserver".into(),
+            Value::Sequence(if app_tun { vec!["system".into()] } else { vec![] }),
+        ),
         ("direct-nameserver".into(), Value::Sequence(vec![])),
         ("direct-nameserver-follow-policy".into(), Value::Bool(false)),
         (
@@ -416,14 +433,8 @@ pub(super) async fn init_dns_config() -> Result<()> {
         ("hosts".into(), Value::Mapping(serde_yaml_ng::Mapping::new())),
     ]);
 
-    let app_dir = dirs::app_home_dir()?;
-    let dns_path = app_dir.join(constants::files::DNS_CONFIG);
-
-    if !dns_path.exists() {
-        logging!(info, Type::Setup, "Creating default DNS config file");
-        help::save_yaml(&dns_path, &default_dns_config, Some("# Clash Verge DNS Config")).await?;
-    }
-
+    logging!(info, Type::Setup, "Creating default DNS config file");
+    help::save_yaml(&dns_path, &default_dns_config, Some("# Clash Verge DNS Config")).await?;
     Ok(())
 }
 

@@ -567,7 +567,8 @@
         },
         "nameserver": {
           "label": "Nameserver",
-          "description": "Lista de servidores DNS, separados por vírgula"
+          "description": "Lista de servidores DNS, separados por vírgula",
+          "appRoute": "Para DoH público, #RULES segue as regras do aplicativo. Use #nó ou #grupo para fixar a saída. O grupo usa o nó selecionado no momento."
         },
         "fallback": {
           "label": "Fallback",

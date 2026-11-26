@@ -1145,6 +1145,7 @@ export interface TranslationResources {
             }
             listen: string
             nameserver: {
+              appRoute: string
               description: string
               label: string
             }

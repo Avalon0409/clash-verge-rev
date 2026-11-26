@@ -567,7 +567,8 @@
         },
         "nameserver": {
           "label": "域名服务器",
-          "description": "DNS 服务器列表，用逗号分隔"
+          "description": "DNS 服务器列表，用逗号分隔",
+          "appRoute": "公网 DoH 使用 #RULES 跟随应用规则。使用 #节点名 或 #分组名 可固定出口，分组随其当前选点。"
         },
         "fallback": {
           "label": "回退服务器",

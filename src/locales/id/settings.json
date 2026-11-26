@@ -567,7 +567,8 @@
         },
         "nameserver": {
           "label": "Nameserver",
-          "description": "List of DNS servers, comma separated"
+          "description": "List of DNS servers, comma separated",
+          "appRoute": "Untuk DoH publik, #RULES mengikuti aturan aplikasi. Gunakan #node atau #grup untuk menetapkan jalur keluar. Grup menggunakan node yang sedang dipilih."
         },
         "fallback": {
           "label": "Fallback",

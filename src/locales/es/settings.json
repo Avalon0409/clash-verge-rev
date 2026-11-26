@@ -567,7 +567,8 @@
         },
         "nameserver": {
           "label": "Servidor DNS",
-          "description": "Lista de servidores DNS, separados por comas"
+          "description": "Lista de servidores DNS, separados por comas",
+          "appRoute": "Para DoH público, #RULES sigue las reglas de la aplicación. Usa #nodo o #grupo para fijar la salida. El grupo usa el nodo seleccionado en ese momento."
         },
         "fallback": {
           "label": "Servidor de respaldo",

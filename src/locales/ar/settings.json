@@ -567,7 +567,8 @@
         },
         "nameserver": {
           "label": "Nameserver",
-          "description": "List of DNS servers, comma separated"
+          "description": "List of DNS servers, comma separated",
+          "appRoute": "يتبع ‎#RULES‎ قواعد التطبيق لاتصالات DoH العامة. يثبت ‎#اسم_العقدة‎ أو ‎#اسم_المجموعة‎ مسار الخروج، وتستخدم المجموعة العقدة المحددة حاليًا."
         },
         "fallback": {
           "label": "Fallback",

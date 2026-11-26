@@ -567,7 +567,8 @@
         },
         "nameserver": {
           "label": "Nameserver",
-          "description": "List of DNS servers, comma separated"
+          "description": "List of DNS servers, comma separated",
+          "appRoute": "For public DoH, #RULES follows the application rules. Use #node or #group to pin the exit. A group uses its currently selected node."
         },
         "fallback": {
           "label": "Fallback",

@@ -1034,18 +1034,15 @@ index 5278132..a696174 100644
  }
 diff --git a/component/resolver/application_dns.go b/component/resolver/application_dns.go
 new file mode 100644
-index 0000000..7d4aba2
+index 0000000..6a173c6
 --- /dev/null
 +++ b/component/resolver/application_dns.go
-@@ -0,0 +1,134 @@
+@@ -0,0 +1,105 @@
 +package resolver
 +
 +import (
 +	"context"
-+	"errors"
-+	"net/netip"
 +	"sync/atomic"
-+	"time"
 +)
 +
 +const SystemDNSProfile = "__system_dns"
@@ -1074,20 +1071,21 @@ index 0000000..7d4aba2
 +}
 +
 +func ApplicationDNS(profile string) Resolver {
-+	if profile == SystemDNSProfile {
-+		return SystemResolver
++	if values := applicationDNS.Load(); values != nil {
++		return (*values)[profile].Resolver
 +	}
-+	values := applicationDNS.Load()
-+	if values == nil {
-+		return nil
++	return nil
++}
++
++func ApplicationTargetDNS(ctx context.Context, direct bool) Resolver {
++	selected, _ := ctx.Value(applicationDNSContextKey{}).(ApplicationResolvers)
++	if direct && selected.Direct != nil {
++		return selected.Direct
 +	}
-+	return (*values)[profile].Resolver
++	return selected.Resolver
 +}
 +
 +func WithApplicationDNS(ctx context.Context, profile string, proxy ...string) context.Context {
-+	if profile == SystemDNSProfile {
-+		return context.WithValue(ctx, applicationDNSContextKey{}, ApplicationResolvers{Resolver: SystemResolver, Proxy: SystemResolver, Direct: SystemResolver})
-+	}
 +	if values := applicationDNS.Load(); values != nil {
 +		if r, ok := (*values)[profile]; ok {
 +			r.profile = profile
@@ -1100,9 +1098,13 @@ index 0000000..7d4aba2
 +	return ctx
 +}
 +
++func WithNativeDNS(ctx context.Context) context.Context {
++	return context.WithValue(ctx, applicationDNSContextKey{}, ApplicationResolvers{})
++}
++
 +func ApplicationDNSRoute(ctx context.Context) (profile, proxy string) {
 +	if selected, ok := ctx.Value(applicationDNSContextKey{}).(ApplicationResolvers); ok {
-+		if selected.profile != GlobalDNSProfile {
++		if selected.profile != GlobalDNSProfile && selected.profile != SystemDNSProfile {
 +			profile = selected.profile
 +		}
 +		return profile, selected.proxy
@@ -1121,131 +1123,42 @@ index 0000000..7d4aba2
 +	if r == DirectHostResolver && selected.Direct != nil {
 +		return selected.Direct
 +	}
++	if r == DefaultResolver && selected.Resolver != nil {
++		return selected.Resolver
++	}
 +	return r
 +}
 +
-+type applicationFallbackResolver struct {
-+	Resolver
-+	system Resolver
-+}
-+
-+func WithSystemFallback(primary, system Resolver) Resolver {
-+	if primary == nil || !primary.Invalid() {
-+		return system
-+	}
-+	return &applicationFallbackResolver{Resolver: primary, system: system}
-+}
-+
-+func (r *applicationFallbackResolver) lookup(ctx context.Context, host string, primary, system func(context.Context, string) ([]netip.Addr, error)) ([]netip.Addr, error) {
-+	budget := DefaultDNSTimeout / 2
-+	if deadline, ok := ctx.Deadline(); ok {
-+		budget = time.Until(deadline) / 2
-+	}
-+	preferred, cancel := context.WithTimeout(ctx, budget)
-+	ips, err := primary(preferred, host)
-+	cancel()
-+	if err == nil && len(ips) != 0 {
-+		return ips, nil
-+	}
-+	if ctx.Err() != nil {
-+		return nil, ctx.Err()
-+	}
-+	if errors.Is(err, ErrIPv6Disabled) {
-+		return nil, err
-+	}
-+	return system(ctx, host)
-+}
-+
-+func (r *applicationFallbackResolver) LookupIP(ctx context.Context, host string) ([]netip.Addr, error) {
-+	return r.lookup(ctx, host, r.Resolver.LookupIP, r.system.LookupIP)
-+}
-+func (r *applicationFallbackResolver) LookupIPv4(ctx context.Context, host string) ([]netip.Addr, error) {
-+	return r.lookup(ctx, host, r.Resolver.LookupIPv4, r.system.LookupIPv4)
-+}
-+func (r *applicationFallbackResolver) LookupIPv6(ctx context.Context, host string) ([]netip.Addr, error) {
-+	return r.lookup(ctx, host, r.Resolver.LookupIPv6, r.system.LookupIPv6)
-+}
-+
-+func applicationHosts(ctx context.Context) *Hosts {
++func lookupApplicationHost(ctx context.Context, host string) (string, *HostValue) {
++	hosts := &DefaultHosts
 +	if selected, ok := ctx.Value(applicationDNSContextKey{}).(ApplicationResolvers); ok && selected.Hosts != nil {
-+		return selected.Hosts
++		hosts = selected.Hosts
 +	}
-+	return &DefaultHosts
-+}
-diff --git a/component/resolver/application_dns_test.go b/component/resolver/application_dns_test.go
-new file mode 100644
-index 0000000..50e33f1
---- /dev/null
-+++ b/component/resolver/application_dns_test.go
-@@ -0,0 +1,53 @@
-+package resolver
-+
-+import (
-+	"context"
-+	"errors"
-+	"net/netip"
-+	"testing"
-+	"time"
-+)
-+
-+type applicationTestResolver struct {
-+	Resolver
-+	calls  int
-+	lookup func(context.Context, string) ([]netip.Addr, error)
-+}
-+
-+func (r *applicationTestResolver) Invalid() bool { return true }
-+func (r *applicationTestResolver) LookupIPv4(ctx context.Context, host string) ([]netip.Addr, error) {
-+	r.calls++
-+	return r.lookup(ctx, host)
-+}
-+
-+func TestApplicationDNSUsesSystemOnlyAfterSubscriptionFails(t *testing.T) {
-+	primary := &applicationTestResolver{lookup: func(ctx context.Context, host string) ([]netip.Addr, error) {
-+		return []netip.Addr{netip.MustParseAddr("192.0.2.1")}, nil
-+	}}
-+	system := &applicationTestResolver{lookup: func(ctx context.Context, host string) ([]netip.Addr, error) {
-+		return []netip.Addr{netip.MustParseAddr("192.0.2.2")}, nil
-+	}}
-+	r := WithSystemFallback(primary, system)
-+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
-+	defer cancel()
-+	ips, err := r.LookupIPv4(ctx, "same.example")
-+	if err != nil || ips[0].String() != "192.0.2.1" || system.calls != 0 {
-+		t.Fatalf("primary answer must win without querying system DNS: %v %v", ips, err)
++	node, matched := hosts.Search(host, false)
++	if matched {
++		return host, node
 +	}
-+	primary.lookup = func(ctx context.Context, host string) ([]netip.Addr, error) { return nil, ErrIPNotFound }
-+	ips, err = r.LookupIPv4(ctx, "same.example")
-+	if err != nil || ips[0].String() != "192.0.2.2" || system.calls != 1 {
-+		t.Fatalf("system DNS must handle failed subscription queries: %v %v", ips, err)
++	if hosts != &DefaultHosts && node != nil && node.IsDomain {
++		return node.Domain, nil
 +	}
-+	primary.lookup = func(ctx context.Context, host string) ([]netip.Addr, error) { <-ctx.Done(); return nil, ctx.Err() }
-+	ips, err = r.LookupIPv4(ctx, "same.example")
-+	if err != nil || ips[0].String() != "192.0.2.2" || system.calls != 2 {
-+		t.Fatalf("primary timeout must leave time for system DNS: %v %v", ips, err)
-+	}
-+	cancelled, stop := context.WithCancel(context.Background())
-+	stop()
-+	_, err = r.LookupIPv4(cancelled, "same.example")
-+	if !errors.Is(err, context.Canceled) || system.calls != 2 {
-+		t.Fatal("cancelled requests must not start fallback DNS queries")
-+	}
++	return host, nil
 +}
 diff --git a/component/resolver/resolver.go b/component/resolver/resolver.go
-index e87a910..4f0c28b 100644
+index e87a910..505deb2 100644
 --- a/component/resolver/resolver.go
 +++ b/component/resolver/resolver.go
-@@ -57,7 +57,8 @@ type Resolver interface {
+@@ -57,7 +57,9 @@ type Resolver interface {
  
  // LookupIPv4WithResolver same as LookupIPv4, but with a resolver
  func LookupIPv4WithResolver(ctx context.Context, host string, r Resolver) ([]netip.Addr, error) {
 -	if node, ok := DefaultHosts.Search(host, false); ok {
 +	r = applicationResolver(ctx, r)
-+	if node, ok := applicationHosts(ctx).Search(host, false); ok {
++	host, node := lookupApplicationHost(ctx, host)
++	if node != nil {
  		if addrs := utils.Filter(node.IPs, func(ip netip.Addr) bool {
  			return ip.Is4()
  		}); len(addrs) > 0 {
-@@ -104,11 +105,12 @@ func ResolveIPv4(ctx context.Context, host string) (netip.Addr, error) {
+@@ -104,11 +106,13 @@ func ResolveIPv4(ctx context.Context, host string) (netip.Addr, error) {
  
  // LookupIPv6WithResolver same as LookupIPv6, but with a resolver
  func LookupIPv6WithResolver(ctx context.Context, host string, r Resolver) ([]netip.Addr, error) {
@@ -1255,21 +1168,23 @@ index e87a910..4f0c28b 100644
  	}
  
 -	if node, ok := DefaultHosts.Search(host, false); ok {
-+	if node, ok := applicationHosts(ctx).Search(host, false); ok {
++	host, node := lookupApplicationHost(ctx, host)
++	if node != nil {
  		if addrs := utils.Filter(node.IPs, func(ip netip.Addr) bool {
  			return ip.Is6()
  		}); len(addrs) > 0 {
-@@ -153,7 +155,8 @@ func ResolveIPv6(ctx context.Context, host string) (netip.Addr, error) {
+@@ -153,7 +157,9 @@ func ResolveIPv6(ctx context.Context, host string) (netip.Addr, error) {
  
  // LookupIPWithResolver same as LookupIP, but with a resolver
  func LookupIPWithResolver(ctx context.Context, host string, r Resolver) ([]netip.Addr, error) {
 -	if node, ok := DefaultHosts.Search(host, false); ok {
 +	r = applicationResolver(ctx, r)
-+	if node, ok := applicationHosts(ctx).Search(host, false); ok {
++	host, node := lookupApplicationHost(ctx, host)
++	if node != nil {
  		return node.IPs, nil
  	}
  
-@@ -231,6 +234,11 @@ func ResolveECH(ctx context.Context, host string) ([]byte, error) {
+@@ -231,6 +237,11 @@ func ResolveECH(ctx context.Context, host string) ([]byte, error) {
  }
  
  func ClearCache() {
@@ -1281,7 +1196,7 @@ index e87a910..4f0c28b 100644
  	if DefaultResolver != nil {
  		go DefaultResolver.ClearCache()
  	}
-@@ -238,6 +246,11 @@ func ClearCache() {
+@@ -238,6 +249,11 @@ func ClearCache() {
  }
  
  func ResetConnection() {
@@ -1295,17 +1210,21 @@ index e87a910..4f0c28b 100644
  	}
 diff --git a/config/application_dns_test.go b/config/application_dns_test.go
 new file mode 100644
-index 0000000..c875155
+index 0000000..edd6802
 --- /dev/null
 +++ b/config/application_dns_test.go
-@@ -0,0 +1,36 @@
+@@ -0,0 +1,58 @@
 +package config
 +
 +import (
++	"net/netip"
++	"strings"
 +	"testing"
 +
 +	"github.com/metacubex/mihomo/component/resolver"
 +	C "github.com/metacubex/mihomo/constant"
++	"github.com/metacubex/mihomo/dns"
++	LC "github.com/metacubex/mihomo/listener/config"
 +)
 +
 +func TestApplicationTUNPersistsFakeIPMappings(t *testing.T) {
@@ -1335,11 +1254,87 @@ index 0000000..c875155
 +		t.Fatal("ordinary TUN persistence preference was changed")
 +	}
 +}
++
++func TestExcludeTunDNSBeforeListenerStarts(t *testing.T) {
++	tun := LC.Tun{Inet4Address: []netip.Prefix{netip.MustParsePrefix("198.19.8.1/30")}, Inet6Address: []netip.Prefix{netip.MustParsePrefix("fd00::1/126")}}
++	captured := dns.NameServer{Addr: "198.19.8.2:53"}
++	native := dns.NameServer{Addr: "198.19.8.3:53"}
++	shared := []dns.NameServer{captured, native}
++	config := DNS{NameServer: shared, NameServerPolicy: []dns.Policy{{Domain: "shared.test", NameServers: shared}, {Domain: "corp.test", NameServers: []dns.NameServer{{Addr: "[fd00::2]:53"}}}}}
++	err := config.excludeTunDNS("application-dns[sub]", tun.DNSEndpoints())
++	if err == nil || !strings.Contains(err.Error(), "application-dns[sub].nameserver-policy[1:corp.test]") {
++		t.Fatalf("missing field error: %v", err)
++	}
++	if servers := config.NameServerPolicy[0].NameServers; len(servers) != 1 || servers[0].Addr != native.Addr {
++		t.Fatalf("wrong shared policy: %+v", servers)
++	}
++	if len(config.NameServer) != 1 || config.NameServer[0].Addr != native.Addr {
++		t.Fatalf("wrong upstream retained: %+v", config.NameServer)
++	}
++}
 diff --git a/config/config.go b/config/config.go
-index 707114a..afd1b56 100644
+index 707114a..f7c98ab 100644
 --- a/config/config.go
 +++ b/config/config.go
-@@ -193,24 +193,26 @@ type TLS struct {
+@@ -175,6 +175,57 @@ type DNS struct {
+ 	DirectFollowPolicy    bool
+ }
+ 
++func (d *DNS) excludeTunDNS(path string, endpoints []netip.AddrPort) error {
++	filter := func(field string, servers *[]dns.NameServer) error {
++		isOwned := func(server dns.NameServer) bool {
++			address := server.Addr
++			if server.Net == "https" {
++				u, err := url.Parse(address)
++				if err != nil {
++					return false
++				}
++				address = u.Host
++			}
++			addr, err := netip.ParseAddrPort(address)
++			return err == nil && slices.Contains(endpoints, addr)
++		}
++		if !slices.ContainsFunc(*servers, isOwned) {
++			return nil
++		}
++		// Comma-separated policies share their parsed nameserver slice.
++		*servers = slices.DeleteFunc(slices.Clone(*servers), isOwned)
++		if len(*servers) == 0 {
++			return fmt.Errorf("%s.%s contains only TUN DNS endpoints", path, field)
++		}
++		return nil
++	}
++	for _, field := range []struct {
++		name    string
++		servers *[]dns.NameServer
++	}{
++		{"nameserver", &d.NameServer}, {"default-nameserver", &d.DefaultNameserver}, {"fallback", &d.Fallback},
++		{"proxy-server-nameserver", &d.ProxyServerNameserver}, {"direct-nameserver", &d.DirectNameServer},
++	} {
++		if err := filter(field.name, field.servers); err != nil {
++			return err
++		}
++	}
++	for _, field := range []struct {
++		name     string
++		policies []dns.Policy
++	}{
++		{"nameserver-policy", d.NameServerPolicy}, {"proxy-server-nameserver-policy", d.ProxyServerPolicy},
++	} {
++		for i := range field.policies {
++			p := &field.policies[i]
++			if err := filter(fmt.Sprintf("%s[%d:%s]", field.name, i, p.Domain), &p.NameServers); err != nil {
++				return err
++			}
++		}
++	}
++	return nil
++}
++
+ // Profile config
+ type Profile struct {
+ 	StoreSelected bool
+@@ -193,24 +244,26 @@ type TLS struct {
  
  // Config is mihomo config manager
  type Config struct {
@@ -1384,7 +1379,7 @@ index 707114a..afd1b56 100644
  }
  
  type RawCors struct {
-@@ -448,24 +450,25 @@ type RawConfig struct {
+@@ -448,24 +501,25 @@ type RawConfig struct {
  	KeepAliveInterval             int                     `yaml:"keep-alive-interval" json:"keep-alive-interval"`
  	DisableKeepAlive              bool                    `yaml:"disable-keep-alive" json:"disable-keep-alive"`
  
@@ -1428,7 +1423,7 @@ index 707114a..afd1b56 100644
  
  	ClashForAndroid RawClashForAndroid `yaml:"clash-for-android" json:"clash-for-android"`
  }
-@@ -720,6 +723,34 @@ func ParseRawConfig(rawCfg *RawConfig) (*Config, error) {
+@@ -720,12 +774,52 @@ func ParseRawConfig(rawCfg *RawConfig) (*Config, error) {
  		return nil, err
  	}
  	config.DNS = dnsCfg
@@ -1463,7 +1458,25 @@ index 707114a..afd1b56 100644
  
  	err = parseTun(rawCfg.Tun, dnsCfg, config.General)
  	if err != nil {
-@@ -859,6 +890,10 @@ func parseNTP(cfg *RawConfig) (*NTP, error) {
+ 		return nil, err
+ 	}
+ 
++	if tun := config.General.Tun; tun.Enable {
++		endpoints := tun.DNSEndpoints()
++		if err := dnsCfg.excludeTunDNS("dns", endpoints); err != nil {
++			return nil, err
++		}
++		for name, profile := range config.ApplicationDNS {
++			if err := profile.excludeTunDNS("application-dns["+name+"]", endpoints); err != nil {
++				return nil, err
++			}
++		}
++	}
++
+ 	err = parseTuicServer(rawCfg.TuicServer, config.General)
+ 	if err != nil {
+ 		return nil, err
+@@ -859,6 +953,10 @@ func parseNTP(cfg *RawConfig) (*NTP, error) {
  }
  
  func parseProfile(cfg *RawConfig) (*Profile, error) {
@@ -1474,6 +1487,46 @@ index 707114a..afd1b56 100644
  	return &Profile{
  		StoreSelected: cfg.Profile.StoreSelected,
  		StoreFakeIP:   cfg.Profile.StoreFakeIP,
+@@ -1393,14 +1491,14 @@ func parseNameServerPolicy(nsPolicy *orderedmap.OrderedMap[string, any], adapter
+ 			if err != nil {
+ 				return nil, err
+ 			}
+-			policy[idx] = dns.Policy{Matcher: matcher, NameServers: nameservers}
++			policy[idx] = dns.Policy{Domain: domain, Matcher: matcher, NameServers: nameservers}
+ 		} else if strings.HasPrefix(domain, "geosite:") {
+ 			country := domain[8:]
+ 			matcher, err := RC.NewGEOSITE(country, adapterName)
+ 			if err != nil {
+ 				return nil, err
+ 			}
+-			policy[idx] = dns.Policy{Matcher: matcher, NameServers: nameservers}
++			policy[idx] = dns.Policy{Domain: domain, Matcher: matcher, NameServers: nameservers}
+ 		} else {
+ 			if _, err := trie.ValidAndSplitDomain(domain); err != nil {
+ 				return nil, fmt.Errorf("%s[%d]: %w", adapterName, idx, err)
+@@ -1475,7 +1573,7 @@ func parseDNS(rawCfg *RawConfig, ruleProviders map[string]P.RuleProvider) (*DNS,
+ 			continue
+ 		}
+ 		host, _, err := net.SplitHostPort(ns.Addr)
+-		if err != nil || net.ParseIP(host) == nil {
++		if _, ipErr := netip.ParseAddr(host); err != nil || ipErr != nil {
+ 			u, err := url.Parse(ns.Addr)
+ 			if err == nil && net.ParseIP(u.Host) == nil {
+ 				if ip, _, err := net.SplitHostPort(u.Host); err != nil || net.ParseIP(ip) == nil {
+diff --git a/constant/adapters.go b/constant/adapters.go
+index 9b0b70c..556da33 100644
+--- a/constant/adapters.go
++++ b/constant/adapters.go
+@@ -326,7 +326,8 @@ type PacketSender interface {
+ 	// the implement must call UDPPacket.Drop() inside Send
+ 	Send(PacketAdapter)
+ 	// Process is a blocking loop to send PacketAdapter to PacketConn and update the WriteBackProxy
+-	Process(PacketConn, WriteBackProxy)
++	Process(context.Context, PacketConn, WriteBackProxy)
++	Context() context.Context
+ 	// Close stop the Process loop
+ 	Close()
+ 	// DoSniff will blocking after sniffer work done
 diff --git a/constant/metadata.go b/constant/metadata.go
 index 76d1e0e..0289e40 100644
 --- a/constant/metadata.go
@@ -1600,10 +1653,10 @@ index 05ea8eb..728a3da 100644
  	case DomainSuffix:
 diff --git a/dns/application_context_test.go b/dns/application_context_test.go
 new file mode 100644
-index 0000000..3cbe65d
+index 0000000..4d6d0d0
 --- /dev/null
 +++ b/dns/application_context_test.go
-@@ -0,0 +1,209 @@
+@@ -0,0 +1,213 @@
 +package dns
 +
 +import (
@@ -1800,17 +1853,21 @@ index 0000000..3cbe65d
 +	}
 +}
 +
-+func TestSubscriptionFallbackRetainsSystemDNSClient(t *testing.T) {
++func TestSystemUpstreamUsesNativeResolverAcrossAppExits(t *testing.T) {
 +	client := &applicationExitDNSClient{}
-+	system := newSystemResolver(client)
-+	primary := NewResolverFromClient(&applicationNoAddressClient{rcode: D.RcodeNameError})
-+	r := resolver.WithSystemFallback(primary, system)
-+	resolver.SetApplicationDNS(map[string]resolver.ApplicationResolvers{"subscription": {Resolver: r}})
++	native := NewResolverFromClient(client)
++	sub := NewResolver(Config{Main: []NameServer{{Net: "rcode", Addr: "name_error"}}, Policy: []Policy{{Domain: "+.corp.example", NameServers: []NameServer{{Net: "system"}}}}, Native: native})
++	resolver.SetApplicationDNS(map[string]resolver.ApplicationResolvers{"sub": {Resolver: sub}})
 +	t.Cleanup(func() { resolver.SetApplicationDNS(nil) })
-+	ctx := resolver.WithApplicationDNS(context.Background(), "subscription", "exit-A")
-+	ips, err := r.LookupIPv4(ctx, "fallback.application.example")
-+	if err != nil || len(ips) != 1 || ips[0].String() != "192.0.2.1" || client.calls.Load() != 1 {
-+		t.Fatalf("subscription fallback lost the system DNS client: ips=%v calls=%d error=%v", ips, client.calls.Load(), err)
++	for _, exit := range []string{"exit-A", "exit-B"} {
++		ctx := resolver.WithApplicationDNS(context.Background(), "sub", exit)
++		ips, err := sub.LookupIPv4(ctx, "office.corp.example")
++		if err != nil || len(ips) != 1 || ips[0].String() != "192.0.2.1" {
++			t.Fatalf("native answer: %v %v", ips, err)
++		}
++	}
++	if client.calls.Load() != 1 {
++		t.Fatalf("native upstream queries: %d", client.calls.Load())
 +	}
 +}
 diff --git a/dns/application_scope.go b/dns/application_scope.go
@@ -2030,7 +2087,7 @@ index 0000000..be3e366
 +	}
 +}
 diff --git a/dns/resolver.go b/dns/resolver.go
-index b8742f2..bfeb914 100644
+index b8742f2..4e80dbe 100644
 --- a/dns/resolver.go
 +++ b/dns/resolver.go
 @@ -3,6 +3,7 @@ package dns
@@ -2173,7 +2230,15 @@ index b8742f2..bfeb914 100644
  	if r != nil {
  		for _, c := range r.main {
  			c.ResetConnection()
-@@ -516,14 +537,20 @@ func (rs Resolvers) ResetConnection() {
+@@ -469,6 +490,7 @@ type Policy struct {
+ }
+ 
+ type Config struct {
++	Native               resolver.Resolver
+ 	Main, Fallback       []NameServer
+ 	Default              []NameServer
+ 	ProxyServer          []NameServer
+@@ -516,16 +538,22 @@ func (rs Resolvers) ResetConnection() {
  }
  
  func NewResolverFromClient(client dnsClient) *Resolver {
@@ -2196,16 +2261,37 @@ index b8742f2..bfeb914 100644
 +
 +func newResolver(config Config) (rs Resolvers) {
  	defaultResolver := &Resolver{
- 		main:        transform(config.Default, nil),
+-		main:        transform(config.Default, nil),
++		main:        transformWithNative(config.Default, nil, config.Native),
  		cache:       config.newCache(),
+ 		ipv6Timeout: time.Duration(config.IPv6Timeout) * time.Millisecond,
+ 	}
+@@ -550,7 +578,7 @@ func NewResolver(config Config) (rs Resolvers) {
+ 			if dc != nil { // reuse raw transport, re-wrap the client
+ 				dc = rewrapClient(dc, ns.Params)
+ 			} else { // no reusable transport: build from scratch
+-				built := transform([]NameServer{ns}, defaultResolver)
++				built := transformWithNative([]NameServer{ns}, defaultResolver, config.Native)
+ 				if len(built) == 0 {
+ 					continue
+ 				}
 diff --git a/dns/system.go b/dns/system.go
-index ab6c010..d0ceb33 100644
+index ab6c010..4f71f63 100644
 --- a/dns/system.go
 +++ b/dns/system.go
-@@ -65,10 +65,15 @@ func newSystemClient() *systemClient {
+@@ -65,10 +65,24 @@ func newSystemClient() *systemClient {
  	}
  }
  
++// The application borrows the native resolver. Its owner resets its upstream connections.
++type nativeDNSClient struct{ resolver.Resolver }
++
++func (nativeDNSClient) Address() string  { return "system" }
++func (nativeDNSClient) ResetConnection() {}
++func (n nativeDNSClient) ExchangeContext(ctx context.Context, m *D.Msg) (*D.Msg, error) {
++	return n.Resolver.ExchangeContext(resolver.WithNativeDNS(ctx), m)
++}
++
 +func newSystemResolver(client dnsClient) Resolvers {
 +	// System DNS always uses native egress, so its client and cache remain shared.
 +	r := newResolver(Config{})
@@ -2222,9 +2308,20 @@ index ab6c010..d0ceb33 100644
 +	resolver.SystemResolver = newSystemResolver(c)
  }
 diff --git a/dns/system_common.go b/dns/system_common.go
-index e6dabdc..1e8968f 100644
+index e6dabdc..41a2984 100644
 --- a/dns/system_common.go
 +++ b/dns/system_common.go
+@@ -59,8 +59,8 @@ func (c *systemClient) getDnsClients() ([]dnsClient, error) {
+ 		}
+ 	}
+ 	dnsClients := make([]dnsClient, 0, len(c.dnsClients))
+-	for _, sdc := range c.dnsClients {
+-		if sdc.disableTimes == 0 {
++	for addr, sdc := range c.dnsClients {
++		if sdc.disableTimes == 0 && !resolver.IsSystemDnsBlacklisted(addr) {
+ 			dnsClients = append(dnsClients, sdc.dnsClient)
+ 		}
+ 	}
 @@ -70,4 +70,12 @@ func (c *systemClient) getDnsClients() ([]dnsClient, error) {
  	return nil, err
  }
@@ -2239,89 +2336,161 @@ index e6dabdc..1e8968f 100644
 +	}
 +	c.dnsClients = make(map[string]*systemDnsClient)
 +}
-diff --git a/dns/tun_upstream_test.go b/dns/tun_upstream_test.go
-new file mode 100644
-index 0000000..9a0c2e0
---- /dev/null
-+++ b/dns/tun_upstream_test.go
-@@ -0,0 +1,20 @@
-+package dns
-+
-+import (
-+	"testing"
-+
-+	"github.com/metacubex/mihomo/component/resolver"
-+)
-+
-+func TestCapturedTunDNSDoesNotBecomeItsOwnUpstream(t *testing.T) {
-+	resolver.AddSystemDnsBlacklist("198.18.0.2", "fdfe:dcba:9876::2")
-+	defer resolver.RemoveSystemDnsBlacklist("198.18.0.2", "fdfe:dcba:9876::2")
-+	clients := transform([]NameServer{
-+		{Net: "udp", Addr: "198.18.0.2:53"},
-+		{Net: "udp", Addr: "[fdfe:dcba:9876::2]:53"},
-+		{Net: "udp", Addr: "192.0.2.53:53"},
-+	}, nil)
-+	if len(clients) != 1 {
-+		t.Fatalf("the physical upstream must remain without a TUN DNS loop: got %d clients", len(clients))
-+	}
-+}
 diff --git a/dns/util.go b/dns/util.go
-index 0a0c6e4..4ced714 100644
+index 0a0c6e4..857d1f2 100644
 --- a/dns/util.go
 +++ b/dns/util.go
-@@ -116,6 +116,9 @@ func isIPRequest(q D.Question) bool {
- func transform(servers []NameServer, resolver resolver.Resolver) []dnsClient {
- 	ret := make([]dnsClient, 0, len(servers))
- 	for _, s := range servers {
-+		if isTunNameServer(s) {
-+			continue
-+		}
- 		var c dnsClient
- 		switch s.Net {
- 		case "tls":
-@@ -143,6 +146,12 @@ func transform(servers []NameServer, resolver resolver.Resolver) []dnsClient {
- 	return ret
+@@ -114,6 +114,10 @@ func isIPRequest(q D.Question) bool {
  }
  
-+func isTunNameServer(server NameServer) bool {
-+	// Profile reloads can snapshot the temporary resolver into explicit system upstreams.
-+	address, err := netip.ParseAddrPort(server.Addr)
-+	return err == nil && resolver.IsSystemDnsBlacklisted(address.Addr().String())
+ func transform(servers []NameServer, resolver resolver.Resolver) []dnsClient {
++	return transformWithNative(servers, resolver, nil)
 +}
 +
- // rewrapClient peels any existing wrapper layers off c to reach the raw transport
- // client, then re-wraps it according to params. Passing a raw client is fine (the
- // peel is a no-op), which lets a shared raw transport be re-wrapped per name server.
++func transformWithNative(servers []NameServer, resolver, native resolver.Resolver) []dnsClient {
+ 	ret := make([]dnsClient, 0, len(servers))
+ 	for _, s := range servers {
+ 		var c dnsClient
+@@ -125,7 +129,11 @@ func transform(servers []NameServer, resolver resolver.Resolver) []dnsClient {
+ 		case "dhcp":
+ 			c = newDHCPClient(s.Addr)
+ 		case "system":
+-			c = newSystemClient()
++			if native != nil {
++				c = nativeDNSClient{native}
++			} else {
++				c = newSystemClient()
++			}
+ 		case "tailscale":
+ 			c = newTailscaleClient(s.Addr)
+ 		case "easytier":
+diff --git a/hub/executor/application_dns_test.go b/hub/executor/application_dns_test.go
+new file mode 100644
+index 0000000..cb4ed8f
+--- /dev/null
++++ b/hub/executor/application_dns_test.go
+@@ -0,0 +1,82 @@
++package executor
++
++import (
++	"context"
++	"errors"
++	"net"
++	"net/netip"
++	"sync/atomic"
++	"testing"
++	"time"
++
++	"github.com/metacubex/mihomo/component/resolver"
++	"github.com/metacubex/mihomo/component/trie"
++	"github.com/metacubex/mihomo/config"
++	"github.com/metacubex/mihomo/dns"
++	D "github.com/miekg/dns"
++)
++
++type countingSystemDNS struct {
++	resolver.Resolver
++	calls atomic.Int32
++}
++
++func (s *countingSystemDNS) LookupIPv4(context.Context, string) ([]netip.Addr, error) {
++	s.calls.Add(1)
++	return []netip.Addr{netip.MustParseAddr("192.0.2.2")}, nil
++}
++
++func TestSubscriptionLookupHonorsDeadline(t *testing.T) {
++	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
++	if err != nil {
++		t.Fatal(err)
++	}
++	ready := make(chan struct{})
++	stop := make(chan struct{})
++	server := &D.Server{PacketConn: pc, NotifyStartedFunc: func() { close(ready) }, Handler: D.HandlerFunc(func(w D.ResponseWriter, q *D.Msg) {
++		select {
++		case <-time.After(3 * time.Second):
++		case <-stop:
++			return
++		}
++		m := new(D.Msg)
++		m.SetReply(q)
++		m.Answer = []D.RR{&D.A{Hdr: D.RR_Header{Name: q.Question[0].Name, Rrtype: D.TypeA, Class: D.ClassINET, Ttl: 60}, A: net.IPv4(192, 0, 2, 1)}}
++		if q.Question[0].Name != "origin.example." {
++			m.Answer = nil
++		}
++		_ = w.WriteMsg(m)
++	})}
++	go server.ActivateAndServe()
++	<-ready
++	defer func() { close(stop); _ = server.Shutdown() }()
++	system := &countingSystemDNS{Resolver: resolver.SystemResolver}
++	previous := resolver.SystemResolver
++	resolver.SystemResolver = system
++	defer func() { resolver.SetApplicationDNS(nil); resolver.SystemResolver = previous }()
++	cfg := &config.Config{General: &config.General{}, DNS: &config.DNS{}, ApplicationDNS: map[string]*config.DNS{"subscription": {Enable: true, NameServer: []dns.NameServer{{Addr: pc.LocalAddr().String()}}}}}
++	table := trie.New[resolver.HostValue]()
++	if err := table.Insert("slow.example", resolver.HostValue{IsDomain: true, Domain: "origin.example"}); err != nil {
++		t.Fatal(err)
++	}
++	cfg.ApplicationHosts = map[string]*trie.DomainTrie[resolver.HostValue]{"subscription": table}
++	updateApplicationDNS(cfg)
++	for _, tc := range []struct {
++		name   string
++		budget time.Duration
++	}{{"slow.example", 5 * time.Second}, {"timeout.example", 30 * time.Millisecond}} {
++		ctx, cancel := context.WithTimeout(resolver.WithApplicationDNS(context.Background(), "subscription", "exit"), tc.budget)
++		ips, err := resolver.LookupIPv4WithResolver(ctx, tc.name, resolver.ApplicationTargetDNS(ctx, false))
++		cancel()
++		if tc.budget < time.Second {
++			if !errors.Is(err, context.DeadlineExceeded) {
++				t.Fatalf("subscription deadline: %v", err)
++			}
++		} else if err != nil || len(ips) != 1 || ips[0] != netip.MustParseAddr("192.0.2.1") {
++			t.Fatalf("subscription answer: %v, %v", ips, err)
++		}
++	}
++	if system.calls.Load() != 0 {
++		t.Fatalf("system queries: %d", system.calls.Load())
++	}
++}
 diff --git a/hub/executor/executor.go b/hub/executor/executor.go
-index 796face..78d6f91 100644
+index 796face..9815b5e 100644
 --- a/hub/executor/executor.go
 +++ b/hub/executor/executor.go
-@@ -103,6 +103,39 @@ func ApplyConfig(cfg *config.Config, force bool) {
+@@ -103,6 +103,7 @@ func ApplyConfig(cfg *config.Config, force bool) {
  	updateHosts(cfg.Hosts)
  	updateGeneral(cfg.General, true)
  	updateDNS(cfg.DNS, cfg.General.IPv6)
++	updateApplicationDNS(cfg)
+ 	updateNTP(cfg.NTP) // initialize NTP after DNS because an NTP server may be a hostname.
+ 	updateListeners(cfg.General, cfg.Listeners, force)
+ 	updateTun(cfg.General) // tun should not care "force"
+@@ -235,6 +236,55 @@ func updateNTP(c *config.NTP) {
+ 	}
+ }
+ 
++func updateApplicationDNS(cfg *config.Config) {
 +	applicationDNS := make(map[string]resolver.ApplicationResolvers, len(cfg.ApplicationDNS))
++	var native resolver.Resolver
++	if _, appTun := cfg.ApplicationDNS[resolver.GlobalDNSProfile]; appTun && cfg.General.Tun.Enable && cfg.DNS.Enable {
++		native = resolver.DefaultResolver
++	}
++	system := resolver.SystemResolver
++	if native != nil {
++		system = native
++	}
 +	for name, settings := range cfg.ApplicationDNS {
 +		if settings.Enable {
-+			r := newDNSResolver(settings, cfg.General.IPv6)
-+			proxy, direct := r.ProxyResolver, r.DirectResolver
-+			if !proxy.Invalid() {
-+				proxy = r.Resolver
++			r := newDNSResolver(settings, cfg.General.IPv6, native)
++			var proxy, direct resolver.Resolver = r, r
++			if r.ProxyResolver.Invalid() {
++				proxy = r.ProxyResolver
 +			}
-+			if !direct.Invalid() {
-+				direct = r.Resolver
++			if r.DirectResolver.Invalid() {
++				direct = r.DirectResolver
 +			}
-+			if name == resolver.GlobalDNSProfile {
-+				applicationDNS[name] = resolver.ApplicationResolvers{Resolver: r, Proxy: proxy, Direct: direct}
-+			} else {
-+				applicationDNS[name] = resolver.ApplicationResolvers{
-+					Resolver: resolver.WithSystemFallback(r, resolver.SystemResolver),
-+					Proxy:    resolver.WithSystemFallback(proxy, resolver.SystemResolver),
-+					Direct:   resolver.WithSystemFallback(direct, resolver.SystemResolver),
-+				}
-+			}
++			applicationDNS[name] = resolver.ApplicationResolvers{Resolver: r, Proxy: proxy, Direct: direct}
 +		} else {
-+			applicationDNS[name] = resolver.ApplicationResolvers{Resolver: resolver.SystemResolver, Proxy: resolver.SystemResolver, Direct: resolver.SystemResolver}
++			applicationDNS[name] = resolver.ApplicationResolvers{Resolver: system, Proxy: system, Direct: system}
 +		}
 +		if hosts := cfg.ApplicationHosts[name]; hosts != nil {
 +			selected := applicationDNS[name]
@@ -2330,19 +2499,15 @@ index 796face..78d6f91 100644
 +			applicationDNS[name] = selected
 +		}
 +	}
++	applicationDNS[resolver.SystemDNSProfile] = resolver.ApplicationResolvers{Resolver: system, Proxy: system, Direct: system}
 +	resolver.SystemResolver.ClearCache()
 +	resolver.SystemResolver.ResetConnection()
 +	resolver.SetApplicationDNS(applicationDNS)
- 	updateNTP(cfg.NTP) // initialize NTP after DNS because an NTP server may be a hostname.
- 	updateListeners(cfg.General, cfg.Listeners, force)
- 	updateTun(cfg.General) // tun should not care "force"
-@@ -235,6 +268,18 @@ func updateNTP(c *config.NTP) {
- 	}
- }
- 
-+func newDNSResolver(c *config.DNS, generalIPv6 bool) dns.Resolvers {
++}
++
++func newDNSResolver(c *config.DNS, generalIPv6 bool, native resolver.Resolver) dns.Resolvers {
 +	return dns.NewResolver(dns.Config{
-+		Main: c.NameServer, Fallback: c.Fallback, IPv6: c.IPv6 && generalIPv6,
++		Native: native, Main: c.NameServer, Fallback: c.Fallback, IPv6: c.IPv6 && generalIPv6,
 +		IPv6Timeout: c.IPv6Timeout, FallbackIPFilter: c.FallbackIPFilter,
 +		FallbackDomainFilter: c.FallbackDomainFilter, FallbackLazyQuery: c.FallbackLazyQuery,
 +		Default: c.DefaultNameserver, Policy: c.NameServerPolicy,
@@ -2355,7 +2520,7 @@ index 796face..78d6f91 100644
  func updateDNS(c *config.DNS, generalIPv6 bool) {
  	if !c.Enable {
  		resolver.DefaultResolver = nil
-@@ -247,23 +292,7 @@ func updateDNS(c *config.DNS, generalIPv6 bool) {
+@@ -247,23 +297,7 @@ func updateDNS(c *config.DNS, generalIPv6 bool) {
  	}
  
  	ipv6 := c.IPv6 && generalIPv6
@@ -2376,7 +2541,7 @@ index 796face..78d6f91 100644
 -		CacheAlgorithm:       c.CacheAlgorithm,
 -		CacheMaxSize:         c.CacheMaxSize,
 -	})
-+	r := newDNSResolver(c, generalIPv6)
++	r := newDNSResolver(c, generalIPv6, nil)
  	m := dns.NewEnhancer(dns.EnhancerConfig{
  		IPv6:          ipv6,
  		EnhancedMode:  c.EnhancedMode,
@@ -2391,6 +2556,27 @@ index 6d37d48..5333b56 100644
 -	render.JSON(w, r, render.M{"meta": C.Meta, "version": C.Version})
 +	render.JSON(w, r, render.M{"meta": C.Meta, "version": C.Version, "applicationProcessRouting": 1, "applicationDNSRouting": 1})
  }
+diff --git a/listener/config/tun.go b/listener/config/tun.go
+index 42dbbbf..0d8794c 100644
+--- a/listener/config/tun.go
++++ b/listener/config/tun.go
+@@ -69,6 +69,16 @@ type Tun struct {
+ 	ProcessorsPerChannel int `yaml:"processors-per-channel" json:"processors-per-channel,omitempty"`
+ }
+ 
++func (t Tun) DNSEndpoints() []netip.AddrPort {
++	var endpoints []netip.AddrPort
++	for _, addresses := range [][]netip.Prefix{t.Inet4Address, t.Inet6Address} {
++		for _, prefix := range addresses {
++			endpoints = append(endpoints, netip.AddrPortFrom(prefix.Addr().Next(), 53))
++		}
++	}
++	return endpoints
++}
++
+ func (t *Tun) Sort() {
+ 	slices.Sort(t.DNSHijack)
+ 
 diff --git a/listener/sing_tun/dns_darwin.go b/listener/sing_tun/dns_darwin.go
 new file mode 100644
 index 0000000..30c9f1b
@@ -2500,7 +2686,7 @@ index 0000000..2a43e6c
 +	return nil, nil
 +}
 diff --git a/listener/sing_tun/server.go b/listener/sing_tun/server.go
-index 1962a1e..b9dc32c 100644
+index 1962a1e..6c6b8ec 100644
 --- a/listener/sing_tun/server.go
 +++ b/listener/sing_tun/server.go
 @@ -65,6 +65,7 @@ type Listener struct {
@@ -2511,7 +2697,26 @@ index 1962a1e..b9dc32c 100644
  }
  
  type ListenerHandler struct {
-@@ -512,6 +513,13 @@ func New(options LC.Tun, tunnel C.Tunnel, additions ...inbound.Addition) (l *Lis
+@@ -290,15 +291,9 @@ func New(options LC.Tun, tunnel C.Tunnel, additions ...inbound.Addition) (l *Lis
+ 	}
+ 
+ 	var dnsServerIp []string
+-	for _, a := range options.Inet4Address {
+-		addrPort := netip.AddrPortFrom(a.Addr().Next(), 53)
+-		dnsServerIp = append(dnsServerIp, a.Addr().Next().String())
+-		dnsAdds = append(dnsAdds, addrPort)
+-	}
+-	for _, a := range options.Inet6Address {
+-		addrPort := netip.AddrPortFrom(a.Addr().Next(), 53)
+-		dnsServerIp = append(dnsServerIp, a.Addr().Next().String())
+-		dnsAdds = append(dnsAdds, addrPort)
++	for _, endpoint := range options.DNSEndpoints() {
++		dnsServerIp = append(dnsServerIp, endpoint.Addr().String())
++		dnsAdds = append(dnsAdds, endpoint)
+ 	}
+ 
+ 	h, err := sing.NewListenerHandler(sing.ListenerConfig{
+@@ -512,6 +507,13 @@ func New(options LC.Tun, tunnel C.Tunnel, additions ...inbound.Addition) (l *Lis
  		return
  	}
  	l.tunStack = tunStack
@@ -2525,7 +2730,7 @@ index 1962a1e..b9dc32c 100644
  
  	if l.autoRedirect != nil {
  		if len(l.options.RouteAddressSet) > 0 && len(l.routeAddressSet) == 0 {
-@@ -610,6 +618,9 @@ type cDialerInterfaceFinder struct {
+@@ -610,6 +612,9 @@ type cDialerInterfaceFinder struct {
  }
  
  func (d *cDialerInterfaceFinder) DefaultInterfaceName(destination netip.Addr) string {
@@ -2535,7 +2740,7 @@ index 1962a1e..b9dc32c 100644
  	if netInterface, _ := DefaultInterfaceFinder.ByAddr(destination); netInterface != nil {
  		return netInterface.Name
  	}
-@@ -677,6 +688,7 @@ func (l *Listener) Close() error {
+@@ -677,6 +682,7 @@ func (l *Listener) Close() error {
  		dialer.DefaultInterfaceFinder.CompareAndSwap(l.cDialerInterfaceFinder, nil)
  	}
  	return common.Close(
@@ -2982,16 +3187,19 @@ index 0000000..4beeba6
 +}
 diff --git a/tunnel/application_dns_test.go b/tunnel/application_dns_test.go
 new file mode 100644
-index 0000000..ccb1583
+index 0000000..177fa69
 --- /dev/null
 +++ b/tunnel/application_dns_test.go
-@@ -0,0 +1,81 @@
+@@ -0,0 +1,209 @@
 +package tunnel
 +
 +import (
 +	"context"
 +	"errors"
++	"net"
++	"net/netip"
 +	"testing"
++	"time"
 +
 +	"github.com/metacubex/mihomo/component/resolver"
 +	C "github.com/metacubex/mihomo/constant"
@@ -3013,7 +3221,17 @@ index 0000000..ccb1583
 +	return nil, errors.New("DNS route probe")
 +}
 +
-+type applicationDNSResolver struct{ resolver.Resolver }
++type applicationDNSResolver struct {
++	resolver.Resolver
++	answer netip.Addr
++	calls  int
++}
++
++func (r *applicationDNSResolver) Invalid() bool { return true }
++func (r *applicationDNSResolver) LookupIPv4(context.Context, string) ([]netip.Addr, error) {
++	r.calls++
++	return []netip.Addr{r.answer}, nil
++}
 +
 +func (*applicationDNSResolver) ResetConnection() {}
 +
@@ -3067,6 +3285,163 @@ index 0000000..ccb1583
 +		t.Fatalf("global-profile application DNS ignored the selected exit: global=%v selected=%v", global.called, selected.called)
 +	}
 +}
++
++type dnsTestLeaf struct {
++	applicationDNSProbe
++	kind C.AdapterType
++}
++
++func (p dnsTestLeaf) Type() C.AdapterType { return p.kind }
++
++type dnsTestGroup struct {
++	applicationDNSProbe
++	leaf C.Proxy
++}
++
++func (g *dnsTestGroup) Unwrap(*C.Metadata, bool) C.Proxy { return g.leaf }
++
++func TestApplicationTargetDNSByLeaf(t *testing.T) {
++	previousRules, previousProxies, previousMode := rules, proxies, mode
++	t.Cleanup(func() {
++		rules, proxies, mode = previousRules, previousProxies, previousMode
++		resolver.SetApplicationDNS(nil)
++	})
++	main := &applicationDNSResolver{answer: netip.MustParseAddr("192.0.2.1")}
++	direct := &applicationDNSResolver{answer: netip.MustParseAddr("192.0.2.2")}
++	resolver.SetApplicationDNS(map[string]resolver.ApplicationResolvers{"sub": {Resolver: main, Direct: direct}})
++	group := &dnsTestGroup{}
++	proxies = map[string]C.Proxy{"group": group}
++	mode = Rule
++	cidr, err := common.NewIPCIDR("192.0.2.0/24", "group")
++	if err != nil {
++		t.Fatal(err)
++	}
++	rules = []C.Rule{cidr}
++	query := func() *C.Metadata {
++		m := &C.Metadata{Type: C.INNER, NetWork: C.TCP, Host: "leaf.example", ApplicationDNSProfile: "sub", ApplicationDNSProxy: "exit"}
++		_, _, err := resolveMetadata(m)
++		if err != nil {
++			t.Fatal(err)
++		}
++		return m
++	}
++	group.leaf = &applicationDNSProbe{name: "exit"}
++	if m := query(); m.DstIP != main.answer || main.calls != 1 {
++		t.Fatalf("proxy should reuse rule IP: %s, calls=%d", m.DstIP, main.calls)
++	}
++	group.leaf = &dnsTestLeaf{kind: C.Direct}
++	if m := query(); m.DstIP != direct.answer || direct.calls != 1 {
++		t.Fatalf("group/direct: %s, calls=%d", m.DstIP, direct.calls)
++	}
++	rules = []C.Rule{common.NewMatch("group")}
++	group.leaf = &dnsTestLeaf{kind: C.RejectDrop}
++	if m := query(); m.Resolved() || main.calls != 2 || direct.calls != 1 {
++		t.Fatalf("rejected destination triggered lookup: %v", m.DstIP)
++	}
++}
++
++type senderTestPacket struct {
++	C.PacketAdapter
++	dest *C.Metadata
++}
++
++func (p senderTestPacket) Metadata() *C.Metadata { return p.dest }
++func (senderTestPacket) Drop()                   {}
++func (senderTestPacket) Data() []byte            { return []byte("app-dns") }
++
++type senderTestConn struct {
++	C.PacketConn
++	socket *net.UDPConn
++}
++
++func (c senderTestConn) WriteTo(b []byte, addr net.Addr) (int, error) {
++	return c.socket.WriteTo(b, addr)
++}
++func (c senderTestConn) SetReadDeadline(at time.Time) error { return c.socket.SetReadDeadline(at) }
++func (c senderTestConn) ResolveUDP(ctx context.Context, m *C.Metadata) error {
++	var err error
++	m.DstIP, err = resolver.ResolveIPWithResolver(ctx, m.Host, resolver.DirectHostResolver)
++	return err
++}
++
++func TestUDPSenderUsesAppResolverForSecondDestination(t *testing.T) {
++	receiver, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer receiver.Close()
++	dest := receiver.LocalAddr().(*net.UDPAddr).AddrPort()
++	first := &C.Metadata{NetWork: C.UDP, DstIP: dest.Addr(), DstPort: dest.Port()}
++	main := &applicationDNSResolver{answer: dest.Addr()}
++	previous := resolver.DirectHostResolver
++	resolver.DirectHostResolver = &applicationDNSResolver{answer: netip.MustParseAddr("127.0.0.2")}
++	resolver.SetApplicationDNS(map[string]resolver.ApplicationResolvers{"sub": {Resolver: main, Direct: main}})
++	defer func() { resolver.SetApplicationDNS(nil); resolver.DirectHostResolver = previous }()
++	socket, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer socket.Close()
++	pc := senderTestConn{socket: socket}
++	sender := newPacketSender()
++	sender.AddMapping(first, first)
++	done := make(chan struct{})
++	go func() {
++		defer close(done)
++		sender.Process(resolver.WithApplicationDNS(sender.Context(), "sub", "exit"), pc, nil)
++	}()
++	defer func() { sender.Close(); <-done }()
++	for _, m := range []*C.Metadata{first, {NetWork: C.UDP, Host: "second.application.example", DstPort: dest.Port()}} {
++		sender.Send(senderTestPacket{dest: m})
++		_ = receiver.SetReadDeadline(time.Now().Add(time.Second))
++		var buf [16]byte
++		if _, _, err = receiver.ReadFromUDP(buf[:]); err != nil {
++			t.Fatal(err)
++		}
++	}
++}
+diff --git a/tunnel/connection.go b/tunnel/connection.go
+index 3a66a76..1cb2aea 100644
+--- a/tunnel/connection.go
++++ b/tunnel/connection.go
+@@ -62,7 +62,7 @@ func (s *packetSender) RestoreReadFrom(addr netip.Addr) netip.Addr {
+ 	return addr
+ }
+ 
+-func (s *packetSender) processPacket(pc C.PacketConn, packet C.PacketAdapter) {
++func (s *packetSender) processPacket(ctx context.Context, pc C.PacketConn, packet C.PacketAdapter) {
+ 	defer packet.Drop()
+ 	metadata := packet.Metadata()
+ 
+@@ -85,7 +85,7 @@ func (s *packetSender) processPacket(pc C.PacketConn, packet C.PacketAdapter) {
+ 		if metadata.Host != "" {
+ 			// TODO: ResolveUDP may take a long time to block the Process loop
+ 			//       but we want keep sequence sending so can't open a new goroutine
+-			if err := pc.ResolveUDP(s.ctx, metadata); err != nil {
++			if err := pc.ResolveUDP(ctx, metadata); err != nil {
+ 				log.Warnln("[UDP] Resolve Ip error: %s", err)
+ 				return
+ 			}
+@@ -101,7 +101,9 @@ func (s *packetSender) processPacket(pc C.PacketConn, packet C.PacketAdapter) {
+ 	_ = handleUDPToRemote(packet, pc, addr)
+ }
+ 
+-func (s *packetSender) Process(pc C.PacketConn, proxy C.WriteBackProxy) {
++func (s *packetSender) Context() context.Context { return s.ctx }
++
++func (s *packetSender) Process(ctx context.Context, pc C.PacketConn, proxy C.WriteBackProxy) {
+ 	for {
+ 		select {
+ 		case <-s.ctx.Done():
+@@ -110,7 +112,7 @@ func (s *packetSender) Process(pc C.PacketConn, proxy C.WriteBackProxy) {
+ 			if proxy != nil {
+ 				proxy.UpdateWriteBack(packet)
+ 			}
+-			s.processPacket(pc, packet)
++			s.processPacket(ctx, pc, packet)
+ 		}
+ 	}
+ }
 diff --git a/tunnel/dns_dialer.go b/tunnel/dns_dialer.go
 index c409a29..53c9876 100644
 --- a/tunnel/dns_dialer.go
@@ -3088,28 +3463,61 @@ index c409a29..53c9876 100644
  			if err != nil {
  				return nil, err
 diff --git a/tunnel/tunnel.go b/tunnel/tunnel.go
-index 86dbc14..01d87cf 100644
+index 86dbc14..ebd5a0e 100644
 --- a/tunnel/tunnel.go
 +++ b/tunnel/tunnel.go
-@@ -335,10 +335,15 @@ func resolveMetadata(metadata *C.Metadata) (proxy C.Proxy, rule C.Rule, err erro
+@@ -324,8 +324,11 @@ func resolveMetadata(metadata *C.Metadata) (proxy C.Proxy, rule C.Rule, err erro
+ 		return
+ 	}
+ 	var (
+-		resolved             bool
+-		attemptProcessLookup = metadata.Type != C.INNER
++		resolved              bool
++		ruleResolver          resolver.Resolver
++		ruleProfile, ruleExit string
++		ruleIP                netip.Addr
++		attemptProcessLookup  = metadata.Type != C.INNER
+ 	)
+ 
+ 	if node, ok := resolver.DefaultHosts.Search(metadata.Host, false); ok {
+@@ -335,17 +338,25 @@ func resolveMetadata(metadata *C.Metadata) (proxy C.Proxy, rule C.Rule, err erro
  
  	helper := C.RuleMatchHelper{
  		ResolveIP: func() {
 -			if !resolved && metadata.Host != "" && !metadata.Resolved() {
-+			if !resolved && metadata.Host != "" && (!metadata.Resolved() || resolver.ApplicationDNS(metadata.ApplicationDNSProfile) != nil) {
- 				ctx, cancel := context.WithTimeout(context.Background(), resolver.DefaultDNSTimeout)
-+				ctx = resolver.WithApplicationDNS(ctx, metadata.ApplicationDNSProfile, metadata.ApplicationDNSProxy)
- 				defer cancel()
+-				ctx, cancel := context.WithTimeout(context.Background(), resolver.DefaultDNSTimeout)
+-				defer cancel()
 -				ip, err := resolver.ResolveIP(ctx, metadata.Host)
-+				r := resolver.ApplicationDNS(metadata.ApplicationDNSProfile)
-+				if r == nil {
-+					r = resolver.DefaultResolver
-+				}
-+				ip, err := resolver.ResolveIPWithResolver(ctx, metadata.Host, r)
- 				if err != nil {
- 					log.Debugln("[DNS] resolve %s error: %s", metadata.Host, err.Error())
- 				} else {
-@@ -353,13 +358,16 @@ func resolveMetadata(metadata *C.Metadata) (proxy C.Proxy, rule C.Rule, err erro
+-				if err != nil {
+-					log.Debugln("[DNS] resolve %s error: %s", metadata.Host, err.Error())
+-				} else {
+-					log.Debugln("[DNS] %s --> %s", metadata.Host, ip.String())
+-					metadata.DstIP = ip
+-				}
+-				resolved = true
++			profile, exit := metadata.ApplicationDNSProfile, metadata.ApplicationDNSProxy
++			if metadata.Host == "" || (resolved && profile == ruleProfile && exit == ruleExit) || (profile == "" && metadata.Resolved()) {
++				return
++			}
++			ctx, cancel := context.WithTimeout(context.Background(), resolver.DefaultDNSTimeout)
++			defer cancel()
++			ctx = resolver.WithApplicationDNS(ctx, profile, exit)
++			r := resolver.ApplicationTargetDNS(ctx, false)
++			if r == nil {
++				r = resolver.DefaultResolver
++			}
++			ip, err := resolver.ResolveIPWithResolver(ctx, metadata.Host, r)
++			ruleResolver, ruleProfile, ruleExit, ruleIP = r, profile, exit, ip
++			resolved = true
++			if err != nil {
++				log.Debugln("[DNS] resolve %s error: %s", metadata.Host, err.Error())
++			} else {
++				log.Debugln("[DNS] %s --> %s", metadata.Host, ip.String())
++				metadata.DstIP = ip
+ 			}
+ 		},
+ 		FindProcess: func() {
+@@ -353,13 +364,16 @@ func resolveMetadata(metadata *C.Metadata) (proxy C.Proxy, rule C.Rule, err erro
  				attemptProcessLookup = false
  				if !features.CMFA {
  					// normal check for process
@@ -3130,24 +3538,50 @@ index 86dbc14..01d87cf 100644
  
  						if pkg, err := process.FindPackageName(metadata); err == nil { // for android (not CMFA) package names
  							metadata.Process = pkg
-@@ -407,6 +415,16 @@ func resolveMetadata(metadata *C.Metadata) (proxy C.Proxy, rule C.Rule, err erro
+@@ -407,6 +421,34 @@ func resolveMetadata(metadata *C.Metadata) (proxy C.Proxy, rule C.Rule, err erro
  	default:
  		proxy, rule, err = match(metadata, helper)
  	}
-+	if r := resolver.ApplicationDNS(metadata.ApplicationDNSProfile); err == nil && r != nil && metadata.Host != "" && proxy != nil && proxy.Name() != "REJECT" {
-+		ctx, cancel := context.WithTimeout(context.Background(), resolver.DefaultDNSTimeout)
-+		ctx = resolver.WithApplicationDNS(ctx, metadata.ApplicationDNSProfile, metadata.ApplicationDNSProxy)
++	if err != nil || proxy == nil || metadata.Host == "" || metadata.ApplicationDNSProfile == "" {
++		return
++	}
++	ctx := resolver.WithApplicationDNS(context.Background(), metadata.ApplicationDNSProfile, metadata.ApplicationDNSProxy)
++	direct := false
++	for leaf := proxy; leaf != nil; leaf = leaf.Unwrap(metadata, false) {
++		switch leaf.Type() {
++		case C.Reject, C.RejectDrop:
++			return
++		case C.Direct:
++			direct = true
++		}
++	}
++	r := resolver.ApplicationTargetDNS(ctx, direct)
++	if r == nil {
++		return
++	}
++	if ruleIP.IsValid() && r == ruleResolver && metadata.ApplicationDNSProfile == ruleProfile && metadata.ApplicationDNSProxy == ruleExit {
++		metadata.DstIP = ruleIP
++	} else {
++		ctx, cancel := context.WithTimeout(ctx, resolver.DefaultDNSTimeout)
 +		defer cancel()
 +		metadata.DstIP, err = resolver.ResolveIPWithResolver(ctx, metadata.Host, r)
 +		if err != nil {
 +			return
 +		}
-+		metadata.DNSMode = C.DNSMapping
 +	}
++	metadata.DNSMode = C.DNSMapping
  	return
  }
  
-@@ -459,12 +477,13 @@ func handleUDPConn(packet C.PacketAdapter) {
+@@ -446,6 +488,7 @@ func handleUDPConn(packet C.PacketAdapter) {
+ 		return sender
+ 	})
+ 	if !loaded {
++		var dnsCtx context.Context
+ 		dial := func() (C.PacketConn, C.WriteBackProxy, error) {
+ 			originMetadata := metadata  // save origin metadata
+ 			metadata = metadata.Clone() // don't modify PacketAdapter's metadata
+@@ -459,12 +502,13 @@ func handleUDPConn(packet C.PacketAdapter) {
  
  			proxy, rule, err := resolveMetadata(metadata)
  			if err != nil {
@@ -3157,12 +3591,22 @@ index 86dbc14..01d87cf 100644
  			}
  
  			dialMetadata := metadata.Pure()
- 			ctx, cancel := context.WithTimeout(context.Background(), C.DefaultUDPTimeout)
-+			ctx = resolver.WithApplicationDNS(ctx, metadata.ApplicationDNSProfile, metadata.ApplicationDNSProxy)
+-			ctx, cancel := context.WithTimeout(context.Background(), C.DefaultUDPTimeout)
++			dnsCtx = resolver.WithApplicationDNS(sender.Context(), metadata.ApplicationDNSProfile, metadata.ApplicationDNSProxy)
++			ctx, cancel := context.WithTimeout(dnsCtx, C.DefaultUDPTimeout)
  			defer cancel()
  			rawPc, err := retry(ctx, func(ctx context.Context) (C.PacketConn, error) {
  				return proxy.ListenPacketContext(ctx, dialMetadata)
-@@ -553,11 +572,11 @@ func handleTCPConn(connCtx C.ConnContext) {
+@@ -493,7 +537,7 @@ func handleUDPConn(packet C.PacketAdapter) {
+ 				natTable.Delete(key)
+ 				return
+ 			}
+-			sender.Process(pc, proxy)
++			sender.Process(dnsCtx, pc, proxy)
+ 		}()
+ 	}
+ 	sender.Send(packet) // nonblocking
+@@ -553,12 +597,12 @@ func handleTCPConn(connCtx C.ConnContext) {
  
  	proxy, rule, err := resolveMetadata(metadata)
  	if err != nil {
@@ -3172,11 +3616,13 @@ index 86dbc14..01d87cf 100644
  	}
  
 -	dialMetadata := metadata
+-	if len(metadata.Host) > 0 {
 +	dialMetadata := metadata.Pure()
- 	if len(metadata.Host) > 0 {
++	if metadata.ApplicationDNSProfile == "" && len(metadata.Host) > 0 {
  		if node, ok := resolver.DefaultHosts.Search(metadata.Host, false); ok {
  			if dstIp, _ := node.RandIP(); !resolver.IsFakeIP(dstIp) {
-@@ -572,6 +591,7 @@ func handleTCPConn(connCtx C.ConnContext) {
+ 				dialMetadata.DstIP = dstIp
+@@ -572,6 +616,7 @@ func handleTCPConn(connCtx C.ConnContext) {
  	var peekLen int
  
  	ctx, cancel := context.WithTimeout(context.Background(), C.DefaultTCPTimeout)
@@ -3184,7 +3630,7 @@ index 86dbc14..01d87cf 100644
  	defer cancel()
  	remoteConn, err := retry(ctx, func(ctx context.Context) (remoteConn C.Conn, err error) {
  		remoteConn, err = proxy.DialContext(ctx, dialMetadata)
-@@ -625,10 +645,15 @@ func handleTCPConn(connCtx C.ConnContext) {
+@@ -625,10 +670,15 @@ func handleTCPConn(connCtx C.ConnContext) {
  }
  
  func logMetadataErr(metadata *C.Metadata, rule C.Rule, proxy C.ProxyAdapter, err error) {
@@ -3202,7 +3648,7 @@ index 86dbc14..01d87cf 100644
  	}
  }
  
-@@ -659,35 +684,78 @@ func match(metadata *C.Metadata, helper C.RuleMatchHelper) (C.Proxy, C.Rule, err
+@@ -659,35 +709,78 @@ func match(metadata *C.Metadata, helper C.RuleMatchHelper) (C.Proxy, C.Rule, err
  	for {
  		var rematchProxy C.Proxy
  		var rematchRule C.Rule
